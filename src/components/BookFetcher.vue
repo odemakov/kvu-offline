@@ -1,73 +1,12 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from "vue";
-
-interface AudioFile {
-  id: string; // Unique identifier
-  url: string;
-  title: string;
-  duration: string;
-  downloaded: boolean;
-  durationSeconds?: number;
-  blob?: Blob;
-}
-
-interface Book {
-  id: string; // URL hash or some unique identifier
-  url: string;
-  title: string;
-  files: AudioFile[];
-  totalDuration: number;
-  downloadedCount: number;
-  totalFiles: number;
-  lastAccessTime?: number; // Timestamp when the book was last accessed
-  lastPlayedFile?: string; // ID of the last played file
-  lastPlayedTime?: number; // Time in seconds where playback was stopped
-}
-
-// Add proper decoding of HTML entities
-function decodeHtmlEntities(text: string): string {
-  const textarea = document.createElement("textarea");
-  textarea.innerHTML = text;
-  return textarea.value;
-}
-
-// Convert duration string (MM:SS) to seconds
-function durationToSeconds(duration: string): number {
-  if (!duration) return 0;
-
-  const parts = duration.split(":");
-  if (parts.length === 2) {
-    return parseInt(parts[0]) * 60 + parseInt(parts[1]);
-  } else if (parts.length === 3) {
-    return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
-  }
-  return 0;
-}
-
-// Format seconds to HH:MM:SS
-function formatDuration(seconds: number): string {
-  if (!seconds) return "0:00";
-
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-
-  if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-  }
-  return `${minutes}:${secs.toString().padStart(2, "0")}`;
-}
-
-// Create a hash from a string for use as ID
-function createHash(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  return hash.toString(16);
-}
+import { AudioFile, Book } from "../types/AudioFile";
+import {
+  decodeHtmlEntities,
+  durationToSeconds,
+  formatDuration,
+  createHash,
+} from "../utils/htmlUtils";
 
 // IndexedDB setup
 const DB_NAME = "kvu-offline-db";
@@ -91,10 +30,13 @@ const isPlaying = ref(false);
 const currentFileIndex = ref(0);
 const currentTime = ref(0);
 const duration = ref(0);
-const progress = ref(0);
 const volume = ref(1);
 
 // Computed properties
+const progress = computed(() => {
+  return (currentTime.value / duration.value) * 100 || 0;
+});
+
 const currentFile = computed(() => {
   if (currentFileIndex.value < 0 || currentFileIndex.value >= audioFiles.length)
     return null;
@@ -233,6 +175,14 @@ async function loadBookFiles(bookId: string): Promise<void> {
         );
         if (lastPlayedIndex !== -1) {
           currentFileIndex.value = lastPlayedIndex;
+
+          if (currentBook.value.lastAccessTime !== undefined) {
+            currentTime.value = currentBook.value.lastPlayedTime;
+          }
+          const file = audioFiles[lastPlayedIndex];
+          if (file.durationSeconds) {
+            duration.value = file.durationSeconds;
+          }
         }
       }
 
@@ -377,19 +327,6 @@ async function downloadBook() {
   //const totalFiles = audioFiles.length;
   let downloadedCount = book.downloadedCount || 0;
 
-  // Create a progress element
-  // const progressContainer = document.createElement("div");
-  // progressContainer.className = "download-progress-container";
-  // progressContainer.innerHTML = `
-  //   <div class="download-progress-text">Downloading ${downloadedCount}/${totalFiles} files...</div>
-  //   <div class="download-progress-bar-bg">
-  //     <div class="download-progress-bar" style="width: ${(downloadedCount / totalFiles) * 100}%"></div>
-  //   </div>
-  // `;
-  // document.body.appendChild(progressContainer);
-
-  // let downloadFailed = false;
-
   // Download each file and store in IndexedDB
   for (let i = 0; i < audioFiles.length; i++) {
     const file = audioFiles[i];
@@ -442,37 +379,10 @@ async function downloadBook() {
         fileInList.downloaded = true;
         fileInList.blob = file.blob;
       }
-
-      // Update progress
-      // const progressBar = progressContainer.querySelector(".download-progress-bar");
-      // const progressText = progressContainer.querySelector(".download-progress-text");
-      // if (progressBar && progressText) {
-      //   const percent = (downloadedCount / totalFiles) * 100;
-      //   progressBar.style.width = `${percent}%`;
-      //   progressText.textContent = `Downloading ${downloadedCount}/${totalFiles} files...`;
-      // }
     } catch (error) {
-      //downloadFailed = false;
       console.error(`Error downloading file ${file.title}:`, error);
     }
   }
-
-  // Final update to progress
-  // const progressBar = progressContainer.querySelector(".download-progress-bar");
-  // const progressText = progressContainer.querySelector(".download-progress-text");
-  // if (progressBar && progressText) {
-  //   progressBar.style.width = "100%";
-  //   if (downloadFailed) {
-  //     progressText.textContent = `Downloaded ${downloadedCount}/${totalFiles} files (some failed)`;
-  //   } else {
-  //     progressText.textContent = `Downloaded ${downloadedCount}/${totalFiles} files`;
-  //   }
-
-  //   // Remove progress bar after a delay
-  //   setTimeout(() => {
-  //     document.body.removeChild(progressContainer);
-  //   }, 2000);
-  // }
 }
 
 async function fetchBookData() {
@@ -830,7 +740,6 @@ function updateProgress() {
 
   currentTime.value = audioPlayer.value.currentTime;
   duration.value = audioPlayer.value.duration;
-  progress.value = (currentTime.value / duration.value) * 100 || 0;
 }
 
 function seek(event: MouseEvent) {
@@ -893,8 +802,8 @@ onMounted(async () => {
       }
     });
 
-    // Save position periodically (every 3 seconds)
-    setInterval(savePlaybackPosition, 3000);
+    // Save position periodically (every 1 seconds)
+    setInterval(savePlaybackPosition, 1000);
 
     // Clean up object URLs before unloading the page
     window.addEventListener("beforeunload", () => {

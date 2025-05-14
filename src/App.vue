@@ -13,11 +13,6 @@ function hideInstallBanner() {
 
 <template>
   <div class="app-container">
-    <header class="app-header">
-      <h1>KVU Offline</h1>
-      <p>Your offline audiobook companion</p>
-    </header>
-
     <div v-if="isInstallable && installBannerVisible" class="install-banner">
       <div class="install-banner-content">
         <p>Install this app on your device for offline use</p>
@@ -31,11 +26,6 @@ function hideInstallBanner() {
     <main class="app-main">
       <BookFetcher />
     </main>
-    <footer class="app-footer">
-      <p>
-        &copy; 2023 KVU Offline - An open-source PWA for offline audiobook listening
-      </p>
-    </footer>
   </div>
 </template>
 

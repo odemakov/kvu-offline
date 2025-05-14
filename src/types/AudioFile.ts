@@ -1,16 +1,22 @@
 export interface AudioFile {
-  id: number;
-  title: string;
+  id: string;
   url: string;
-  duration: number;
-  durationFloat?: number;
-  error?: number;
+  title: string;
+  duration: string;
+  downloaded: boolean;
+  durationSeconds?: number;
+  blob?: Blob;
 }
 
-export interface BookInfo {
+export interface Book {
+  id: string;
+  url: string;
   title: string;
-  author?: string;
-  reader?: string;
-  cover?: string;
-  audioFiles: AudioFile[];
+  files: AudioFile[];
+  totalDuration: number;
+  downloadedCount: number;
+  totalFiles: number;
+  lastAccessTime?: number; // Timestamp when the book was last accessed
+  lastPlayedFile?: string; // ID of the last played file
+  lastPlayedTime?: number; // Time in seconds where playback was stopped
 }
