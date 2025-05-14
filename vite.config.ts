@@ -22,8 +22,8 @@ export default defineConfig({
         theme_color: "#ffffff",
         background_color: "#ffffff",
         display: "standalone",
-        scope: "/",
-        start_url: "/",
+        scope: "/kvu-offline/",
+        start_url: "/kvu-offline/",
         icons: [
           {
             src: "pwa-192x192.png",
@@ -45,6 +45,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg}"],
+        navigateFallback: "/kvu-offline/index.html",
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/s2\.knigavuhe\.org\/.*\.mp3$/,

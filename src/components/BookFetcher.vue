@@ -336,7 +336,7 @@ async function downloadBook() {
     try {
       let blob;
       try {
-        const response = await fetch("/api/proxy-data", {
+        const response = await fetch("/kvu-offline/api/proxy-data", {
           cache: "no-store",
           method: "POST",
           headers: {
@@ -416,7 +416,7 @@ async function fetchBookData() {
     }
 
     // Fetch the HTML content
-    const response = await fetch("/api/proxy-html", {
+    const response = await fetch("/kvu-offline/api/proxy-html", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
