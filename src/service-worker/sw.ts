@@ -1,8 +1,8 @@
-import { precacheAndRoute } from 'workbox-precaching';
-import { registerRoute } from 'workbox-routing';
-import { CacheFirst, StaleWhileRevalidate } from 'workbox-strategies';
-import { ExpirationPlugin } from 'workbox-expiration';
-import { CacheableResponsePlugin } from 'workbox-cacheable-response';
+import { CacheableResponsePlugin } from "workbox-cacheable-response";
+import { ExpirationPlugin } from "workbox-expiration";
+import { precacheAndRoute } from "workbox-precaching";
+import { registerRoute } from "workbox-routing";
+import { CacheFirst, StaleWhileRevalidate } from "workbox-strategies";
 
 declare let self: ServiceWorkerGlobalScope;
 
@@ -11,77 +11,77 @@ precacheAndRoute(self.__WB_MANIFEST);
 
 // Cache Google Fonts
 registerRoute(
-  ({ url }) => url.origin === 'https://fonts.googleapis.com' ||
-               url.origin === 'https://fonts.gstatic.com',
+  ({ url }) =>
+    url.origin === "https://fonts.googleapis.com" ||
+    url.origin === "https://fonts.gstatic.com",
   new StaleWhileRevalidate({
-    cacheName: 'google-fonts',
+    cacheName: "google-fonts",
     plugins: [
       new ExpirationPlugin({
         maxEntries: 30,
         maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
       }),
       new CacheableResponsePlugin({
-        statuses: [0, 200]
+        statuses: [0, 200],
       }),
     ],
-  })
+  }),
 );
 
 // Cache audio files with CacheFirst strategy
 registerRoute(
-  ({ request }) => request.destination === 'audio',
+  ({ request }) => request.destination === "audio",
   new CacheFirst({
-    cacheName: 'audio-cache',
+    cacheName: "audio-cache",
     plugins: [
       new CacheableResponsePlugin({
-        statuses: [0, 200]
+        statuses: [0, 200],
       }),
       new ExpirationPlugin({
         maxEntries: 100,
         maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
       }),
     ],
-  })
+  }),
 );
 
 // Cache images with CacheFirst strategy
 registerRoute(
-  ({ request }) => request.destination === 'image',
+  ({ request }) => request.destination === "image",
   new CacheFirst({
-    cacheName: 'image-cache',
+    cacheName: "image-cache",
     plugins: [
       new CacheableResponsePlugin({
-        statuses: [0, 200]
+        statuses: [0, 200],
       }),
       new ExpirationPlugin({
         maxEntries: 60,
         maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
       }),
     ],
-  })
+  }),
 );
 
 // Default fetch strategy for everything else
 registerRoute(
-  ({ request }) => ['style', 'script', 'document'].includes(request.destination),
+  ({ request }) => ["style", "script", "document"].includes(request.destination),
   new StaleWhileRevalidate({
-    cacheName: 'static-resources',
+    cacheName: "static-resources",
     plugins: [
       new CacheableResponsePlugin({
-        statuses: [0, 200]
+        statuses: [0, 200],
       }),
     ],
-  })
+  }),
 );
 
 // Handle offline - respond with offline page when network request fails
-self.addEventListener('fetch', (event) => {
-  if (event.request.mode === 'navigate') {
-    event.respondWith(
-      fetch(event.request)
-        .catch(() => {
-          return caches.match('/offline.html');
-        })
-    );
-  }
-});
+// self.addEventListener("fetch", (event) => {
+//   if (event.request.mode === "navigate") {
+//     event.respondWith(
+//       fetch(event.request).catch(() => {
+//         return caches.match("/offline.html");
+//       }),
+//     );
+//   }
+// });

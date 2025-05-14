@@ -96,7 +96,7 @@ app.post("/api/proxy-data", async (req, res) => {
 });
 
 // Health check endpoint
-app.get("/health", (req, res) => {
+app.get("/health", (_, res) => {
   res.json({ status: "ok" });
 });
 

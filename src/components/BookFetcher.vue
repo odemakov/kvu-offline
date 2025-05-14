@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from "vue";
-import { AudioFile, Book } from "../types/AudioFile";
+import { ref, watch, reactive, onMounted, computed } from "vue";
+import { type AudioFile, type Book } from "../types/AudioFile";
 import {
   decodeHtmlEntities,
   durationToSeconds,
@@ -176,13 +176,8 @@ async function loadBookFiles(bookId: string): Promise<void> {
         if (lastPlayedIndex !== -1) {
           currentFileIndex.value = lastPlayedIndex;
 
-          if (currentBook.value.lastAccessTime !== undefined) {
-            currentTime.value = currentBook.value.lastPlayedTime;
-          }
-          const file = audioFiles[lastPlayedIndex];
-          if (file.durationSeconds) {
-            duration.value = file.durationSeconds;
-          }
+          currentTime.value = currentBook.value.lastPlayedTime || 0;
+          duration.value = audioFiles[lastPlayedIndex].durationSeconds || 0;
         }
       }
 
@@ -222,6 +217,10 @@ async function switchBook(bookId: string): Promise<void> {
   // Update last access time
   book.lastAccessTime = Date.now();
   await saveBook(book);
+
+  // reset player progress
+  currentTime.value = 0;
+  duration.value = 0;
 
   // Load the book's files
   await loadBookFiles(bookId);
@@ -272,7 +271,7 @@ async function saveBook(book: Book): Promise<void> {
     });
 
     transaction.oncomplete = () => {
-      console.log("Book saved successfully");
+      //console.log("Book saved successfully");
 
       // Update the local books array
       const index = books.findIndex((b) => b.id === book.id);
@@ -537,7 +536,7 @@ async function fetchBookData() {
       });
     }
 
-    console.log("Extracted audio files:", audioFiles);
+    //console.log("Extracted audio files:", audioFiles);
 
     // Sort the audio files by track number if possible
     audioFiles.sort((a, b) => {
@@ -802,8 +801,8 @@ onMounted(async () => {
       }
     });
 
-    // Save position periodically (every 1 seconds)
-    setInterval(savePlaybackPosition, 1000);
+    // Save position periodically (every 3 seconds)
+    setInterval(savePlaybackPosition, 3000);
 
     // Clean up object URLs before unloading the page
     window.addEventListener("beforeunload", () => {
@@ -816,6 +815,10 @@ onMounted(async () => {
     errorMessage.value =
       "Failed to initialize the application. Please refresh the page.";
   }
+});
+
+watch(volume, (newVolume) => {
+  setVolume(newVolume);
 });
 </script>
 
@@ -946,14 +949,7 @@ onMounted(async () => {
         </div>
 
         <div class="volume-control">
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            v-model="volume"
-            @input="setVolume(parseFloat($event.target.value))"
-          />
+          <input type="range" min="0" max="1" step="0.01" v-model.number="volume" />
         </div>
       </div>
 

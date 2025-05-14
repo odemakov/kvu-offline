@@ -1,16 +1,16 @@
-import { createApp } from 'vue'
-import './style.css'
-import App from './App.vue'
-import { registerSW } from 'virtual:pwa-register'
+import { registerSW } from "virtual:pwa-register";
+import { createApp } from "vue";
+import App from "./App.vue";
+import "./style.css";
 
 // Register service worker
-const updateSW = registerSW({
+registerSW({
   onNeedRefresh() {
-    console.log('New content available, please refresh.')
+    console.log("New content available, please refresh.");
   },
   onOfflineReady() {
-    console.log('App ready to work offline')
+    console.log("App ready to work offline");
   },
-})
+});
 
-createApp(App).mount('#app')
+createApp(App).mount("#app");
