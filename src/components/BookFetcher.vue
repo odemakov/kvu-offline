@@ -96,13 +96,9 @@ const volume = ref(1);
 
 // Computed properties
 const currentFile = computed(() => {
-  if (
-    !currentBook.value ||
-    currentFileIndex.value < 0 ||
-    !currentBook.value.files.length
-  )
+  if (currentFileIndex.value < 0 || currentFileIndex.value >= audioFiles.length)
     return null;
-  return currentBook.value.files[currentFileIndex.value];
+  return audioFiles[currentFileIndex.value];
 });
 
 // Initialize IndexedDB
