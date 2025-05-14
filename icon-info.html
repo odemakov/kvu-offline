@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PWA Icons Information</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      line-height: 1.6;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 {
+      color: #333;
+    }
+    .icon-info {
+      margin-bottom: 20px;
+      padding: 15px;
+      background-color: #f7f7f7;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>PWA Icons Information</h1>
+  
+  <div class="icon-info">
+    <h2>Required Icons</h2>
+    <p>For this PWA to work properly, the following icon files need to be created:</p>
+    <ul>
+      <li><strong>favicon.ico</strong> - Site favicon (16x16, 32x32, 48x48)</li>
+      <li><strong>apple-touch-icon.png</strong> - Apple touch icon (180x180)</li>
+      <li><strong>pwa-192x192.png</strong> - PWA icon (192x192)</li>
+      <li><strong>pwa-512x512.png</strong> - PWA icon (512x512)</li>
+      <li><strong>masked-icon.svg</strong> - Safari pinned tab icon</li>
+    </ul>
+  </div>
+  
+  <div class="icon-info">
+    <h2>Icon Creation</h2>
+    <p>You can create these icons using:</p>
+    <ul>
+      <li>Graphic design software like Adobe Illustrator, Photoshop, or GIMP</li>
+      <li>Online icon generators like <a href="https://realfavicongenerator.net/">RealFaviconGenerator</a></li>
+      <li>PWA asset generators like <a href="https://github.com/vite-pwa/assets-generator">vite-pwa/assets-generator</a></li>
+    </ul>
+  </div>
+  
+  <div class="icon-info">
+    <h2>File Locations</h2>
+    <p>All icon files should be placed in the <code>public</code> directory of your project, so they can be properly referenced by the PWA manifest.</p>
+  </div>
+</body>
+</html>

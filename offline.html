@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KVU Offline - No Connection</title>
+  <style>
+    body {
+      font-family: 'Avenir', Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      margin: 0;
+      padding: 0;
+      background-color: #f5f5f5;
+      color: #2c3e50;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      text-align: center;
+    }
+    
+    .container {
+      padding: 20px;
+      max-width: 500px;
+    }
+    
+    h1 {
+      margin-bottom: 10px;
+    }
+    
+    p {
+      margin-bottom: 20px;
+      line-height: 1.5;
+    }
+    
+    .icon {
+      font-size: 64px;
+      margin-bottom: 20px;
+    }
+    
+    .button {
+      display: inline-block;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: bold;
+      text-decoration: none;
+    }
+    
+    .button:hover {
+      background-color: #45a049;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">📡</div>
+    <h1>You're Offline</h1>
+    <p>It seems you've lost your internet connection. KVU Offline requires an internet connection to download new books, but you can still access your previously downloaded content.</p>
+    <p>Please check your connection and try again.</p>
+    <a href="/" class="button">Retry</a>
+  </div>
+  
+  <script>
+    // Check for network status changes
+    window.addEventListener('online', () => {
+      window.location.href = '/';
+    });
+    
+    document.querySelector('.button').addEventListener('click', (e) => {
+      e.preventDefault();
+      if (navigator.onLine) {
+        window.location.href = '/';
+      } else {
+        alert('You are still offline. Please check your connection.');
+      }
+    });
+  </script>
+</body>
+</html>
