@@ -70,10 +70,10 @@ export default defineConfig({
   ],
   server: {
     proxy: {
-      "/api/proxy": {
+      "/kvu-offline/api/proxy": {
         target: "http://localhost:3000",
         changeOrigin: true,
-        rewrite: (path) => path,
+        rewrite: (path) => path.replace("/kvu-offline", ""),
       },
     },
   },

@@ -11,7 +11,7 @@ app.use(cors());
 app.use(express.json());
 
 // Proxy endpoint
-app.post("/kvu-offline/api/proxy-html", async (req, res) => {
+app.post("/api/proxy-html", async (req, res) => {
   try {
     const { url } = req.body;
 
