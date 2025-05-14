@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import BookFetcher from './components/BookFetcher.vue'
-import { useInstallPWA } from './composables/useInstallPWA';
+import { ref } from "vue";
+import BookFetcher from "./components/BookFetcher.vue";
+import { useInstallPWA } from "./composables/useInstallPWA";
 
-const { isInstallable, isInstalled, installApp } = useInstallPWA();
+const { isInstallable, installApp } = useInstallPWA();
 const installBannerVisible = ref(true);
 
 function hideInstallBanner() {
@@ -17,7 +17,7 @@ function hideInstallBanner() {
       <h1>KVU Offline</h1>
       <p>Your offline audiobook companion</p>
     </header>
-    
+
     <div v-if="isInstallable && installBannerVisible" class="install-banner">
       <div class="install-banner-content">
         <p>Install this app on your device for offline use</p>
@@ -27,19 +27,21 @@ function hideInstallBanner() {
         </div>
       </div>
     </div>
-    
+
     <main class="app-main">
       <BookFetcher />
     </main>
     <footer class="app-footer">
-      <p>&copy; 2023 KVU Offline - An open-source PWA for offline audiobook listening</p>
+      <p>
+        &copy; 2023 KVU Offline - An open-source PWA for offline audiobook listening
+      </p>
     </footer>
   </div>
 </template>
 
 <style>
 :root {
-  --primary-color: #4CAF50;
+  --primary-color: #4caf50;
   --primary-hover: #45a049;
   --text-color: #2c3e50;
   --bg-color: #f5f5f5;
@@ -52,7 +54,7 @@ function hideInstallBanner() {
 }
 
 body {
-  font-family: 'Avenir', Helvetica, Arial, sans-serif;
+  font-family: "Avenir", Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   margin: 0;
@@ -153,12 +155,12 @@ body {
   .app-main {
     padding: 1rem 0.5rem;
   }
-  
+
   .install-banner-content {
     flex-direction: column;
     gap: 10px;
   }
-  
+
   .install-banner-content p {
     margin: 0;
   }
