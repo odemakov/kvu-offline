@@ -7,7 +7,9 @@
     "dev": "concurrently \"vite\" \"npm run server\"",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
-    "server": "tsx src/server/index.ts"
+    "server": "tsx src/server/index.ts",
+    "deploy": "npm run build && gh-pages -d dist",
+    "predeploy": "npm run build"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -22,6 +24,7 @@
     "@vitejs/plugin-vue": "^5.2.3",
     "@vue/tsconfig": "^0.7.0",
     "concurrently": "^8.2.2",
+    "gh-pages": "6.3.0",
     "tsx": "^4.7.0",
     "typescript": "~5.8.3",
     "vite": "^6.3.5",
