@@ -40,5 +40,44 @@ export function createHash(str: string): string {
     hash = (hash << 5) - hash + char;
     hash = hash & hash; // Convert to 32bit integer
   }
-  return hash.toString(16);
+  // Ensure the hash is always positive
+  const positiveHash = Math.abs(hash).toString(16);
+  return positiveHash;
 }
+
+// Normalize URL to standard format
+export function normalizeUrl(url: string): string {
+  // Make sure URL starts with https://
+  let normalizedUrl = url.trim();
+  if (!normalizedUrl.startsWith("http")) {
+    normalizedUrl = "https://" + normalizedUrl;
+  }
+
+  // Remove trailing slashes
+  while (normalizedUrl.endsWith("/")) {
+    normalizedUrl = normalizedUrl.slice(0, -1);
+  }
+
+  return normalizedUrl;
+}
+
+// Validate the URL format
+export function validateUrl(url: string): boolean {
+  if (!url) return false;
+
+  const normalizedUrl = normalizeUrl(url);
+  // Simple validation: must be a knigavuhe.org URL
+  return normalizedUrl.includes("knigavuhe.org") && normalizedUrl.length > 20;
+}
+
+//   // Calculate duration in seconds
+//   let durationSeconds = 0;
+//   const durationParts = duration.split(":");
+//   if (durationParts.length === 2) {
+//     durationSeconds = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+//   } else if (durationParts.length === 3) {
+//     durationSeconds =
+//       parseInt(durationParts[0]) * 3600 +
+//       parseInt(durationParts[1]) * 60 +
+//       parseInt(durationParts[2]);
+//   }

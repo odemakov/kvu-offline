@@ -1,16 +1,108 @@
-<script setup lang="ts">
-import { ref, watch, reactive, onMounted, computed } from "vue";
-import { type AudioFile, type Book } from "../types/AudioFile";
-import {
-  decodeHtmlEntities,
-  durationToSeconds,
-  formatDuration,
-  createHash,
-} from "../utils/htmlUtils";
+<template>
+  <div class="book-fetcher">
+    <h1>Audiobook Player</h1>
+    <div class="description">
+      Enter a book URL from knigavuhe.org to start listening.
+    </div>
 
+    <div class="input-form">
+      <input
+        v-model="bookUrl"
+        class="url-input"
+        placeholder="Enter book URL (e.g., https://knigavuhe.org/book/...)"
+        :disabled="isLoading"
+      />
+      <button
+        @click="downloadBook"
+        class="download-button"
+        :disabled="!validateUrl(bookUrl) || isLoading"
+      >
+        <template v-if="isLoading">
+          <div class="loading-spinner"></div>
+          Loading...
+        </template>
+        <template v-else> <span class="icon">↓</span> Download </template>
+      </button>
+    </div>
+
+    <div v-if="errorMessage" class="error-message">{{ errorMessage }}</div>
+
+    <div class="book-switcher">
+      <button @click="toggleLibrary" class="library-button">
+        <span class="icon">📚</span> Library
+      </button>
+    </div>
+
+    <LibraryList
+      :books="books"
+      :currentBookId="currentBook?.id || null"
+      :showLibrary="showBooksList"
+      @select-book="switchBook"
+      @close="showBooksList = false"
+    />
+
+    <CurrentBook
+      :book="currentBook"
+      :files="audioFiles"
+      :currentFileId="currentFile?.id || null"
+      @play-file="playFileById"
+      @download-file="downloadFileById"
+    />
+
+    <!-- Audio Player -->
+    <div class="audio-player-wrapper" v-if="audioFiles.length > 0 && currentFile">
+      <div class="player-info">
+        <div class="now-playing">
+          <strong>Now Playing:</strong> {{ currentFile.title }}
+        </div>
+      </div>
+
+      <div class="player-controls">
+        <button @click="playPrevious" class="control-button" :disabled="!hasPrevious">
+          <span class="icon">⏮</span>
+        </button>
+        <button v-if="!isPlaying" @click="playAudio" class="control-button play-button">
+          <span class="icon">▶</span>
+        </button>
+        <button v-else @click="pauseAudio" class="control-button pause-button">
+          <span class="icon">⏸</span>
+        </button>
+        <button @click="playNext" class="control-button" :disabled="!hasNext">
+          <span class="icon">⏭</span>
+        </button>
+
+        <div class="progress-container" @click="seek">
+          <div class="progress-bar" :style="{ width: progress + '%' }"></div>
+        </div>
+
+        <div class="time-display">
+          {{ formatTime(currentTime) }} / {{ formatTime(duration) }}
+        </div>
+
+        <div class="volume-control">
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            v-model="volume"
+            @input="setVolume"
+          />
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
+import { type AudioFile, type Book } from "../types/AudioFile";
+import LibraryList from "./LibraryList.vue";
+import CurrentBook from "./CurrentBook.vue";
+import { createHash, validateUrl } from "../utils/htmlUtils";
 import { fetchProxiedHTML, downloadProxiedFile } from "../utils/proxyUtils";
 
-// IndexedDB setup
+// Database configuration
 const DB_NAME = "kvu-offline-db";
 const DB_VERSION = 1;
 const BOOKS_STORE = "books";
@@ -21,8 +113,8 @@ let db: IDBDatabase | null = null;
 const bookUrl = ref("");
 const isLoading = ref(false);
 const errorMessage = ref("");
-const audioFiles = reactive<AudioFile[]>([]);
-const books = reactive<Book[]>([]);
+const audioFiles = ref<AudioFile[]>([]);
+const books = ref<Book[]>([]);
 const currentBook = ref<Book | null>(null);
 const showBooksList = ref(false);
 
@@ -32,20 +124,26 @@ const isPlaying = ref(false);
 const currentFileIndex = ref(0);
 const currentTime = ref(0);
 const duration = ref(0);
-const volume = ref(1);
+const volume = ref(0.75);
 
 // Computed properties
 const progress = computed(() => {
-  return (currentTime.value / duration.value) * 100 || 0;
+  return duration.value > 0 ? (currentTime.value / duration.value) * 100 : 0;
 });
 
 const currentFile = computed(() => {
-  if (currentFileIndex.value < 0 || currentFileIndex.value >= audioFiles.length)
-    return null;
-  return audioFiles[currentFileIndex.value];
+  return audioFiles.value.length > 0 ? audioFiles.value[currentFileIndex.value] : null;
 });
 
-// Initialize IndexedDB
+const hasNext = computed(() => {
+  return currentFileIndex.value < audioFiles.value.length - 1;
+});
+
+const hasPrevious = computed(() => {
+  return currentFileIndex.value > 0;
+});
+
+// Initialize the database
 function initDB(): Promise<void> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -69,7 +167,7 @@ function initDB(): Promise<void> {
         db.createObjectStore(BOOKS_STORE, { keyPath: "id" });
       }
 
-      // Create files store
+      // Create files store with index for bookId
       if (!db.objectStoreNames.contains(FILES_STORE)) {
         const filesStore = db.createObjectStore(FILES_STORE, { keyPath: "id" });
         filesStore.createIndex("bookId", "bookId", { unique: false });
@@ -78,7 +176,7 @@ function initDB(): Promise<void> {
   });
 }
 
-// Load books from IndexedDB
+// Load all books from the database
 async function loadBooks(): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!db) return reject(new Error("Database not initialized"));
@@ -88,7 +186,7 @@ async function loadBooks(): Promise<void> {
     const request = store.getAll();
 
     request.onsuccess = () => {
-      books.length = 0;
+      books.value.length = 0;
 
       // Sort books by last access time (newest first)
       const sortedBooks = request.result.sort((a: Book, b: Book) => {
@@ -97,13 +195,13 @@ async function loadBooks(): Promise<void> {
         return timeB - timeA;
       });
 
-      books.push(...sortedBooks);
+      books.value.push(...sortedBooks);
 
       // If we have books, load the most recent one
-      if (books.length > 0) {
+      if (books.value.length > 0) {
         const lastBookId = localStorage.getItem("lastBookId");
         if (lastBookId) {
-          const lastBook = books.find((book) => book.id === lastBookId);
+          const lastBook = books.value.find((book) => book.id === lastBookId);
           if (lastBook) {
             currentBook.value = lastBook;
             bookUrl.value = lastBook.url;
@@ -114,24 +212,24 @@ async function loadBooks(): Promise<void> {
 
             loadBookFiles(lastBook.id);
           } else {
-            currentBook.value = books[0];
-            bookUrl.value = books[0].url;
+            currentBook.value = books.value[0];
+            bookUrl.value = books.value[0].url;
 
             // Update last access time
-            books[0].lastAccessTime = Date.now();
-            saveBook(books[0]);
+            books.value[0].lastAccessTime = Date.now();
+            saveBook(books.value[0]);
 
-            loadBookFiles(books[0].id);
+            loadBookFiles(books.value[0].id);
           }
         } else {
-          currentBook.value = books[0];
-          bookUrl.value = books[0].url;
+          currentBook.value = books.value[0];
+          bookUrl.value = books.value[0].url;
 
           // Update last access time
-          books[0].lastAccessTime = Date.now();
-          saveBook(books[0]);
+          books.value[0].lastAccessTime = Date.now();
+          saveBook(books.value[0]);
 
-          loadBookFiles(books[0].id);
+          loadBookFiles(books.value[0].id);
         }
       }
 
@@ -156,7 +254,7 @@ async function loadBookFiles(bookId: string): Promise<void> {
     const request = index.getAll(bookId);
 
     request.onsuccess = () => {
-      audioFiles.length = 0;
+      audioFiles.value.length = 0;
 
       // Sort files by their index
       const files = request.result.sort((a: AudioFile, b: AudioFile) => {
@@ -168,18 +266,18 @@ async function loadBookFiles(bookId: string): Promise<void> {
         return a.title.localeCompare(b.title);
       });
 
-      audioFiles.push(...files);
+      audioFiles.value.push(...files);
 
       if (currentBook.value && currentBook.value.lastPlayedFile) {
         // Find the index of the last played file
-        const lastPlayedIndex = audioFiles.findIndex(
+        const lastPlayedIndex = audioFiles.value.findIndex(
           (file) => file.id === currentBook.value?.lastPlayedFile,
         );
         if (lastPlayedIndex !== -1) {
           currentFileIndex.value = lastPlayedIndex;
 
           currentTime.value = currentBook.value.lastPlayedTime || 0;
-          duration.value = audioFiles[lastPlayedIndex].durationSeconds || 0;
+          duration.value = audioFiles.value[lastPlayedIndex].durationSeconds || 0;
         }
       }
 
@@ -193,94 +291,85 @@ async function loadBookFiles(bookId: string): Promise<void> {
   });
 }
 
-// Switch to a different book
-async function switchBook(bookId: string): Promise<void> {
-  // Pause current playback
-  if (isPlaying.value) {
-    pauseAudio();
+// Switch to another book in the library
+async function switchBook(bookId: string) {
+  showBooksList.value = false;
+  if (audioPlayer.value) {
+    audioPlayer.value.pause();
+    isPlaying.value = false;
   }
 
-  // Clean up any existing object URL
-  if (audioPlayer.value?.src.startsWith("blob:")) {
-    URL.revokeObjectURL(audioPlayer.value.src);
+  // Save current playback position before switching
+  if (currentBook.value && currentFile.value) {
+    savePlaybackPosition();
   }
 
-  // Find the book
-  const book = books.find((b) => b.id === bookId);
-  if (!book) {
-    errorMessage.value = "Book not found";
-    return;
-  }
+  const book = books.value.find((b) => b.id === bookId);
+  if (book) {
+    currentBook.value = book;
+    bookUrl.value = book.url;
 
-  // Update current book
-  currentBook.value = book;
-  bookUrl.value = book.url;
+    // Update last access time
+    book.lastAccessTime = Date.now();
+    saveBook(book);
 
-  // Update last access time
-  book.lastAccessTime = Date.now();
-  await saveBook(book);
+    // Load the files for this book
+    await loadBookFiles(book.id);
 
-  // reset player progress
-  currentTime.value = 0;
-  duration.value = 0;
-
-  // Load the book's files
-  await loadBookFiles(bookId);
-
-  // Reset player position
-  currentFileIndex.value = 0;
-  if (book.lastPlayedFile) {
-    const lastPlayedIndex = audioFiles.findIndex(
-      (file) => file.id === book.lastPlayedFile,
-    );
-    if (lastPlayedIndex !== -1) {
-      currentFileIndex.value = lastPlayedIndex;
+    // Auto-play from last position if there's a last played file
+    if (book.lastPlayedFile) {
+      const fileIndex = audioFiles.value.findIndex(
+        (file) => file.id === book.lastPlayedFile,
+      );
+      if (fileIndex !== -1) {
+        currentFileIndex.value = fileIndex;
+        currentTime.value = book.lastPlayedTime || 0;
+        setTimeout(() => {
+          playAudio();
+        }, 500);
+      }
     }
   }
-
-  // Save as last book
-  localStorage.setItem("lastBookId", bookId);
 }
 
-// Save a book to IndexedDB
+// Save book to database
 async function saveBook(book: Book): Promise<void> {
+  console.log("Attempting to save book:", JSON.stringify(book, null, 2));
+  console.log("Book object keys:", Object.keys(book));
+  console.log("Book object:", book);
   return new Promise((resolve, reject) => {
     if (!db) return reject(new Error("Database not initialized"));
 
-    const transaction = db.transaction([BOOKS_STORE, FILES_STORE], "readwrite");
+    const transaction = db.transaction(BOOKS_STORE, "readwrite");
     const bookStore = transaction.objectStore(BOOKS_STORE);
-    const fileStore = transaction.objectStore(FILES_STORE);
 
-    // Extract blobs and save them separately
-    const blobs: { id: string; blob: Blob }[] = [];
-    const cleanBook = {
-      ...book,
-      files: book.files.map((file) => {
-        if (file.blob) {
-          blobs.push({ id: file.id, blob: file.blob });
-        }
-        const { blob, ...cleanFile } = file;
-        return cleanFile;
-      }),
+    // Create a clean copy with only serializable data
+    // to avoid "Failed to execute 'put' on 'IDBObjectStore': #<Object> could not be cloned." error
+    const bookToSave = {
+      id: book.id,
+      url: book.url,
+      title: book.title,
+      authors: book.authors,
+      cover: book.cover,
+      readers: book.readers,
+      duration: book.duration,
+      downloadedCount: book.downloadedCount,
+      totalFiles: book.totalFiles,
+      lastAccessTime: book.lastAccessTime,
+      lastPlayedFile: book.lastPlayedFile,
+      lastPlayedTime: book.lastPlayedTime,
     };
 
     // Save the book
-    bookStore.put(cleanBook);
-
-    // save the blobs
-    blobs.forEach(({ id, blob }) => {
-      fileStore.put({ id, blob });
-    });
+    bookStore.put(bookToSave);
 
     transaction.oncomplete = () => {
-      //console.log("Book saved successfully");
-
       // Update the local books array
-      const index = books.findIndex((b) => b.id === book.id);
+      const index = books.value.findIndex((b) => b.id === book.id);
       if (index !== -1) {
-        books[index] = book;
+        books.value[index] = book;
       } else {
-        books.push(book);
+        books.value.push(book);
       }
 
       // Save as last book
@@ -296,17 +385,23 @@ async function saveBook(book: Book): Promise<void> {
   });
 }
 
-// Save a file to IndexedDB
-async function saveFile(file: AudioFile, bookId: string): Promise<void> {
+// Save file to database
+async function saveFile(file: AudioFile): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!db) return reject(new Error("Database not initialized"));
 
     const transaction = db.transaction(FILES_STORE, "readwrite");
     const store = transaction.objectStore(FILES_STORE);
 
-    // Add bookId to the file object
-    const fileWithBookId = { ...file, bookId };
-    const request = store.put(fileWithBookId);
+    const fileToSave = {
+      id: file.id,
+      bookId: file.bookId,
+      url: file.url,
+      title: file.title,
+      downloaded: file.downloaded,
+      duration: file.duration,
+    };
+    const request = store.put(fileToSave);
 
     request.onsuccess = () => {
       console.log("File saved successfully");
@@ -320,795 +415,513 @@ async function saveFile(file: AudioFile, bookId: string): Promise<void> {
   });
 }
 
-// Download all files for the current book
+// Download the book data from the URL
 async function downloadBook() {
-  if (!currentBook.value || !audioFiles.length) return;
+  if (!validateUrl(bookUrl.value) || isLoading.value) return;
 
-  const book = currentBook.value;
-  //const totalFiles = audioFiles.length;
-  let downloadedCount = book.downloadedCount || 0;
-
-  // Download each file and store in IndexedDB
-  for (let i = 0; i < audioFiles.length; i++) {
-    const file = audioFiles[i];
-    if (file.downloaded) {
-      continue;
-    }
-
-    try {
-      const blob = await downloadProxiedFile(file.url);
-
-      // Verify we got an audio file (check MIME type)
-      if (blob && (!blob.type || !blob.type.includes("audio/"))) {
-        console.warn(`Downloaded file doesn't appear to be audio: ${blob.type}`);
-      }
-
-      file.downloaded = true;
-      file.blob = blob;
-      await saveFile(file, book.id);
-
-      // Update book download stats
-      downloadedCount++;
-      book.downloadedCount = downloadedCount;
-      await saveBook(book);
-
-      // Update UI for this file
-      const fileInList = audioFiles.find((f) => f.id === file.id);
-      if (fileInList) {
-        fileInList.downloaded = true;
-        fileInList.blob = file.blob;
-      }
-    } catch (error) {
-      console.error(`Error downloading file ${file.title}:`, error);
-    }
-  }
-}
-
-async function fetchBookData() {
-  isLoading.value = true;
-  audioFiles.length = 0;
   errorMessage.value = "";
+  isLoading.value = true;
 
   try {
-    if (!bookUrl.value) {
-      throw new Error("Please enter a URL");
-    }
+    // Check if the book already exists
+    const existingBookIndex = books.value.findIndex(
+      (book) => book.url === bookUrl.value,
+    );
 
-    if (!validateUrl(bookUrl.value)) {
-      throw new Error(
-        "Please enter a valid book URL from knigavuhe.org (e.g., https://knigavuhe.org/book/example/)",
-      );
-    }
-
-    // Normalize URL to prevent duplicates
-    const normalizedUrl = normalizeUrl(bookUrl.value);
-    bookUrl.value = normalizedUrl;
-
-    // Check if we already have this book in the database
-    const bookId = createHash(normalizedUrl);
-    const existingBook = books.find((book) => book.id === bookId);
-
-    if (existingBook) {
+    // If book exists, switch to it
+    if (existingBookIndex !== -1) {
+      const existingBook = books.value[existingBookIndex];
       currentBook.value = existingBook;
-      await loadBookFiles(bookId);
+
+      // Update last access time
+      existingBook.lastAccessTime = Date.now();
+      await saveBook(existingBook);
+
+      // Load its files
+      await loadBookFiles(existingBook.id);
       isLoading.value = false;
       return;
     }
 
-    // Fetch the HTML content
-    const html = await fetchProxiedHTML(bookUrl.value);
-
-    // Create a DOM parser to parse the HTML
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, "text/html");
-
-    // Extract the book title
-    const bookTitleElement = doc.querySelector(".book_title");
-    let bookTitle = bookTitleElement
-      ? bookTitleElement.textContent?.trim()
-      : "Unknown Book";
-
-    // Decode HTML entities in the title
-    bookTitle = decodeHtmlEntities(bookTitle || "Unknown Book");
-
-    // Find the BookPlayer initialization data
-    const scripts = doc.querySelectorAll("script");
-    let bookPlayerData = null;
-
-    for (const script of scripts) {
-      const content = script.textContent || "";
-
-      // Try to find BookPlayer initialization
-      if (content.includes("BookPlayer")) {
-        console.log("Found script with BookPlayer");
-
-        // First pattern: new BookPlayer(bookId, [...playlist items...], options)
-        const playerMatch = content.match(
-          /var\s+player\s*=\s*new\s+BookPlayer\s*\(\s*\d+\s*,\s*(\[[\s\S]*?\])\s*[\s\S]*?\)/,
-        );
-
-        if (playerMatch && playerMatch[1]) {
-          try {
-            // Clean the JSON string - replace single quotes with double quotes and remove trailing commas
-            const jsonStr = playerMatch[1]
-              .replace(/'/g, '"')
-              .replace(/,\s*}/g, "}")
-              .replace(/,\s*]/g, "]");
-
-            const playlistData = JSON.parse(jsonStr);
-            bookPlayerData = { playlist: playlistData };
-            console.log("Successfully parsed BookPlayer data with first pattern");
-            break;
-          } catch (e) {
-            console.error("Failed to parse BookPlayer data with first pattern:", e);
-          }
-        }
-      }
-    }
-
-    if (bookPlayerData && bookPlayerData.playlist) {
-      // Use the extracted BookPlayer data
-      bookPlayerData.playlist.forEach((track: any) => {
-        if (track.url) {
-          // Clean up the URL by removing escaped backslashes
-          const cleanUrl = track.url.replace(/\\/g, "");
-
-          const urlParts = cleanUrl.split("/");
-          const fileName = urlParts[urlParts.length - 1];
-
-          // Extract track title from URL if not provided
-          const title =
-            track.title ||
-            (() => {
-              // Try to extract title from filename
-              const fileNameMatch = fileName.match(/([^\/]+)\.mp3$/);
-              return fileNameMatch
-                ? fileNameMatch[1].replace(/-/g, " ")
-                : `Track ${audioFiles.length + 1}`;
-            })();
-
-          // Convert duration from seconds to MM:SS format if available as a number
-          let formattedDuration = "";
-          let durationSeconds = 0;
-
-          if (track.duration) {
-            if (typeof track.duration === "number") {
-              durationSeconds = track.duration;
-              formattedDuration = formatDuration(durationSeconds);
-            } else {
-              formattedDuration = track.duration.toString();
-              durationSeconds = durationToSeconds(formattedDuration);
-            }
-          }
-
-          /*
-          interface AudioFile {
-            id: string; // Unique identifier
-            url: string;
-            title: string;
-            duration: string;
-            durationSeconds?: number;
-            downloaded: boolean;
-            blob?: Blob;
-          }
-          */
-          audioFiles.push({
-            id: cleanUrl,
-            url: cleanUrl,
-            title: title,
-            duration: formattedDuration,
-            durationSeconds: durationSeconds,
-            downloaded: false,
-          });
-        }
-      });
-    }
-
-    //console.log("Extracted audio files:", audioFiles);
-
-    // Sort the audio files by track number if possible
-    audioFiles.sort((a, b) => {
-      const numA = parseInt(a.title.match(/\d+/)?.[0] || "0");
-      const numB = parseInt(b.title.match(/\d+/)?.[0] || "0");
-      if (numA && numB) {
-        return numA - numB;
-      }
-      return a.title.localeCompare(b.title);
-    });
-
-    // Calculate total duration
-    let totalDuration = 0;
-    audioFiles.forEach((file) => {
-      if (file.durationSeconds) {
-        totalDuration += file.durationSeconds;
-      }
-    });
-
-    // Create new book object
-    const newBook: Book = {
-      id: createHash(bookUrl.value),
-      url: bookUrl.value,
-      title: bookTitle,
-      files: [],
-      totalDuration,
-      downloadedCount: 0,
-      totalFiles: audioFiles.length,
-      lastAccessTime: Date.now(),
-    };
-
-    // Prepare files for storage with added IDs and downloaded status
-    for (let i = 0; i < audioFiles.length; i++) {
-      const file = audioFiles[i];
-      file.id = `${newBook.id}-${i}`;
-      file.downloaded = false;
-
-      // Store in book's files array
-      newBook.files.push(file);
-
-      // Save each file to IndexedDB
-      await saveFile(file, newBook.id);
-    }
-
-    // Save the book to IndexedDB
-    await saveBook(newBook);
-
-    // Set as current book
-    currentBook.value = newBook;
+    // Otherwise fetch the new book
+    await fetchBookData();
   } catch (error) {
-    console.error("Error fetching book data:", error);
+    console.error("Download failed:", error);
     errorMessage.value =
-      error instanceof Error ? error.message : "An unknown error occurred";
+      error instanceof Error
+        ? error.message
+        : "Failed to download book data. Please try again.";
   } finally {
     isLoading.value = false;
   }
 }
 
-// Normalize URL to prevent duplicates
-function normalizeUrl(url: string): string {
-  try {
-    const urlObj = new URL(url);
-    // Keep only hostname and pathname
-    const normalized = `https://${urlObj.hostname}${urlObj.pathname}`;
-    // Ensure pathname ends with trailing slash
-    return normalized.endsWith("/") ? normalized : `${normalized}/`;
-  } catch (e) {
-    return url;
-  }
-}
+// Fetch book data from knigavuhe.org
+async function fetchBookData() {
+  // Fetch the HTML content
+  const html = await fetchProxiedHTML(bookUrl.value);
 
-function validateUrl(url: string): boolean {
-  try {
-    const urlObj = new URL(url);
-    return (
-      urlObj.hostname.includes("knigavuhe.org") && urlObj.pathname.includes("/book/")
-    );
-  } catch (e) {
-    return false;
-  }
-}
+  // Parse the HTML to extract book info and files
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
 
-// Audio player controls
-async function playAudio() {
-  if (!audioPlayer.value || !currentFile.value) return;
+  // Find the BookPlayer initialization data
+  const scripts = doc.querySelectorAll("script");
+  let bookPlayerData = null;
+  for (const script of scripts) {
+    const content = script.textContent || "";
 
-  // If the file is downloaded, use the blob from IndexedDB
-  if (currentFile.value.downloaded) {
-    if (!currentFile.value.blob) {
-      try {
-        // Load the blob from IndexedDB if not already loaded
-        const transaction = db?.transaction(FILES_STORE, "readonly");
-        const store = transaction?.objectStore(FILES_STORE);
-        const request = store?.get(currentFile.value.id);
-        console.log(store);
-        console.log(request);
+    // Try to find BookPlayer initialization
+    if (content.includes("BookPlayer")) {
+      const playerMatch = content.match(
+        /var\s+player\s*=\s*new\s+BookPlayer\s*\(\s*\d+\s*,\s*(\[[\s\S]*?\])\s*[\s\S]*?\)/,
+      );
+      console.log(playerMatch);
+      if (playerMatch && playerMatch[1]) {
+        try {
+          // Clean the JSON string - replace single quotes with double quotes and remove trailing commas
+          const jsonStr = playerMatch[1]
+            .replace(/'/g, '"')
+            .replace(/,\s*}/g, "}")
+            .replace(/,\s*]/g, "]");
 
-        if (request) {
-          await new Promise<void>((resolve, reject) => {
-            if (!request) {
-              reject("Failed to get file from IndexedDB");
-              return;
-            }
+          const playlistData = JSON.parse(jsonStr);
+          bookPlayerData = { playlist: playlistData };
+          console.log("Successfully parsed BookPlayer data with first pattern");
+          console.log(bookPlayerData);
 
-            request.onsuccess = () => {
-              if (request.result && request.result.blob) {
-                currentFile.value!.blob = request.result.blob;
-                resolve();
-              } else {
-                reject("No blob found in file data");
-              }
-            };
-
-            request.onerror = () => {
-              reject("Error getting file from IndexedDB");
-            };
-          });
+          break;
+        } catch (e) {
+          console.error("Failed to parse BookPlayer data with first pattern:", e);
         }
-      } catch (error) {
-        console.error("Error loading blob from IndexedDB:", error);
       }
     }
+  }
 
-    // Create object URL from blob
-    if (currentFile.value.blob) {
-      // Revoke any previous object URL to avoid memory leaks
-      if (audioPlayer.value.src.startsWith("blob:")) {
-        URL.revokeObjectURL(audioPlayer.value.src);
-      }
-      const objectUrl = URL.createObjectURL(currentFile.value.blob);
-      audioPlayer.value.src = objectUrl;
+  if (bookPlayerData == null) {
+    throw new Error("Could not parse BookPlayer data");
+  }
+
+  if (bookPlayerData.playlist.length === 0) {
+    throw new Error("No chapters found");
+  }
+
+  let book: Book | undefined;
+  let totalDuration = 0;
+  const files: AudioFile[] = [];
+  let count = 0;
+
+  bookPlayerData.playlist.forEach((chapter: any) => {
+    if (!book) {
+      // Create a new book object
+      book = {
+        id: createHash(bookUrl.value),
+        url: bookUrl.value,
+        title: chapter.player_data.title,
+        authors: chapter.player_data.authors,
+        readers: chapter.player_data.readers,
+        cover: chapter.player_data.cover,
+        duration: 0,
+        downloadedCount: 0,
+        totalFiles: bookPlayerData.playlist.length,
+        lastAccessTime: Date.now(),
+      };
+    }
+
+    // No need to check if book exists here since we just created it above
+    totalDuration += chapter.duration;
+    files.push({
+      id: book.id + "-" + count++,
+      bookId: book.id,
+      url: chapter.url,
+      title: chapter.title,
+      duration: chapter.duration,
+      downloaded: false,
+    });
+  });
+  console.log(files);
+
+  // Check if book was created before updating duration
+  if (book) {
+    book.duration = totalDuration;
+  } else {
+    // Handle the case where playlist was empty
+    throw new Error("Unable to create book from empty playlist");
+  }
+
+  // Save the book to the database
+  await saveBook(book);
+
+  // Save all files to the database
+  await Promise.all(files.map((file) => saveFile(file)));
+
+  // Set current book and load files
+  currentBook.value = book;
+  await loadBookFiles(book.id);
+}
+
+// Play a file by its ID
+function playFileById(fileId: string) {
+  const fileIndex = audioFiles.value.findIndex((file) => file.id === fileId);
+  if (fileIndex !== -1) {
+    currentFileIndex.value = fileIndex;
+    playAudio();
+  }
+}
+
+// Download a file by its ID
+async function downloadFileById(fileId: string) {
+  const fileIndex = audioFiles.value.findIndex((file) => file.id === fileId);
+  if (fileIndex === -1) return;
+
+  const file = audioFiles.value[fileIndex];
+
+  try {
+    const blob = await downloadProxiedFile(file.url);
+
+    // Update file with blob and downloaded status
+    file.blob = blob;
+    file.downloaded = true;
+
+    // Save updated file
+    await saveFile(file);
+
+    // Update book stats
+    if (currentBook.value) {
+      currentBook.value.downloadedCount++;
+      await saveBook(currentBook.value);
+    }
+
+    console.log(`File ${file.title} downloaded successfully`);
+  } catch (error) {
+    console.error("Error downloading file:", error);
+    errorMessage.value = "Failed to download file. Please try again.";
+  }
+}
+
+// Play the current audio file
+async function playAudio() {
+  if (!currentFile.value) return;
+
+  // If there's no audio player element yet, create one
+  if (!audioPlayer.value) {
+    audioPlayer.value = new Audio();
+    audioPlayer.value.volume = volume.value;
+
+    // Set up event listeners
+    audioPlayer.value.addEventListener("timeupdate", updateProgress);
+    audioPlayer.value.addEventListener("ended", playNext);
+    audioPlayer.value.addEventListener("loadedmetadata", () => {
+      duration.value = audioPlayer.value?.duration || 0;
+    });
+  }
+
+  // Reset the player
+  audioPlayer.value.pause();
+
+  try {
+    // Set up the audio source
+    if (currentFile.value.downloaded && currentFile.value.blob) {
+      // Use the downloaded blob
+      audioPlayer.value.src = URL.createObjectURL(currentFile.value.blob);
     } else {
-      // Fallback to URL
+      // Stream from URL
       audioPlayer.value.src = currentFile.value.url;
     }
-  } else {
-    // Use URL for streaming
-    audioPlayer.value.src = currentFile.value.url;
-  }
 
-  // If there's a lastPlayedTime and we're at the beginning of the file
-  if (
-    currentBook.value?.lastPlayedTime &&
-    currentBook.value?.lastPlayedFile === currentFile.value.id &&
-    audioPlayer.value.currentTime < 1
-  ) {
-    // Seek to the saved position minus 10 seconds (for context)
-    const seekTime = Math.max(0, currentBook.value.lastPlayedTime - 10);
-    audioPlayer.value.currentTime = seekTime;
-  }
+    // Set the current time if we have a saved position
+    if (
+      currentBook.value &&
+      currentBook.value.lastPlayedFile === currentFile.value.id &&
+      currentBook.value.lastPlayedTime
+    ) {
+      currentTime.value = currentBook.value.lastPlayedTime;
+      audioPlayer.value.currentTime = currentTime.value;
+    } else {
+      currentTime.value = 0;
+    }
 
-  try {
+    // Play the audio
     await audioPlayer.value.play();
     isPlaying.value = true;
+
+    // Update book's last played info
+    if (currentBook.value) {
+      currentBook.value.lastPlayedFile = currentFile.value.id;
+      saveBook(currentBook.value);
+    }
   } catch (error) {
     console.error("Error playing audio:", error);
     errorMessage.value = "Failed to play audio. Please try again.";
+    isPlaying.value = false;
   }
 }
 
+// Pause the current audio
 function pauseAudio() {
   if (!audioPlayer.value) return;
+
   audioPlayer.value.pause();
   isPlaying.value = false;
 
-  // Save the current position
+  // Save current position
   savePlaybackPosition();
 }
 
+// Play the previous file
 function playPrevious() {
-  if (!currentBook.value || !audioPlayer.value) return;
-
-  // Clean up any existing object URL
-  if (audioPlayer.value.src.startsWith("blob:")) {
-    URL.revokeObjectURL(audioPlayer.value.src);
-  }
-
   if (currentFileIndex.value > 0) {
+    // Save current position before switching
+    savePlaybackPosition();
+
     currentFileIndex.value--;
     playAudio();
   }
 }
 
+// Play the next file
 function playNext() {
-  if (!currentBook.value || !audioPlayer.value) return;
+  if (currentFileIndex.value < audioFiles.value.length - 1) {
+    // Save current position before switching
+    savePlaybackPosition();
 
-  // Clean up any existing object URL
-  if (audioPlayer.value.src.startsWith("blob:")) {
-    URL.revokeObjectURL(audioPlayer.value.src);
-  }
-
-  if (currentFileIndex.value < currentBook.value.files.length - 1) {
     currentFileIndex.value++;
     playAudio();
+  } else {
+    // End of playlist
+    isPlaying.value = false;
   }
 }
 
+// Update progress based on audio player's current time
 function updateProgress() {
   if (!audioPlayer.value) return;
 
   currentTime.value = audioPlayer.value.currentTime;
-  duration.value = audioPlayer.value.duration;
 }
 
+// Seek to position in the audio
 function seek(event: MouseEvent) {
-  if (!audioPlayer.value) return;
+  if (!audioPlayer.value || !duration.value) return;
 
-  const progressBar = event.currentTarget as HTMLElement;
-  const rect = progressBar.getBoundingClientRect();
-  const percent = (event.clientX - rect.left) / rect.width;
+  const progressContainer = event.currentTarget as HTMLElement;
+  const { left, width } = progressContainer.getBoundingClientRect();
+  const clickPosition = (event.clientX - left) / width;
 
-  audioPlayer.value.currentTime = percent * audioPlayer.value.duration;
-  updateProgress();
+  const newTime = clickPosition * duration.value;
+  audioPlayer.value.currentTime = newTime;
+  currentTime.value = newTime;
 }
 
-function setVolume(value: number) {
+// Set the volume
+function setVolume() {
   if (!audioPlayer.value) return;
 
-  volume.value = value;
-  audioPlayer.value.volume = value;
-  localStorage.setItem("playerVolume", value.toString());
+  audioPlayer.value.volume = volume.value;
+  localStorage.setItem("audioVolume", volume.value.toString());
 }
 
+// Save the current playback position
 function savePlaybackPosition() {
-  if (!currentBook.value || !audioPlayer.value || !currentFile.value) return;
+  if (!currentBook.value || !currentFile.value || !audioPlayer.value) return;
 
-  // Only save if we've played at least 5 seconds
-  if (audioPlayer.value.currentTime > 5) {
-    currentBook.value.lastPlayedFile = currentFile.value.id;
-    currentBook.value.lastPlayedTime = audioPlayer.value.currentTime;
+  currentBook.value.lastPlayedFile = currentFile.value.id;
+  currentBook.value.lastPlayedTime = audioPlayer.value.currentTime;
 
-    // Save to IndexedDB
-    saveBook(currentBook.value);
-  }
+  saveBook(currentBook.value);
 }
 
-// Initialize audio player when component mounts
+// Toggle library visibility
+function toggleLibrary() {
+  showBooksList.value = !showBooksList.value;
+}
+
+// Format time in seconds to MM:SS or HH:MM:SS
+function formatTime(seconds: number): string {
+  if (!seconds) return "0:00";
+
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+
+  const formattedMinutes = minutes < 10 && hours > 0 ? `0${minutes}` : minutes;
+  const formattedSeconds = secs < 10 ? `0${secs}` : secs;
+
+  return hours > 0
+    ? `${hours}:${formattedMinutes}:${formattedSeconds}`
+    : `${formattedMinutes}:${formattedSeconds}`;
+}
+
+// Lifecycle hooks
 onMounted(async () => {
   try {
-    // Initialize IndexedDB
     await initDB();
     await loadBooks();
 
-    // Set up audio player
-    audioPlayer.value = new Audio();
-
-    // Restore volume setting
-    const savedVolume = localStorage.getItem("playerVolume");
+    // Load saved volume
+    const savedVolume = localStorage.getItem("audioVolume");
     if (savedVolume) {
       volume.value = parseFloat(savedVolume);
-      audioPlayer.value.volume = volume.value;
     }
-
-    // Add event listeners
-    audioPlayer.value.addEventListener("timeupdate", updateProgress);
-    audioPlayer.value.addEventListener("ended", playNext);
-    audioPlayer.value.addEventListener("error", (e) => {
-      console.error("Audio player error:", e);
-      // Try to recover by playing the next track
-      if (currentFileIndex.value < audioFiles.length - 1) {
-        setTimeout(playNext, 1000);
-      }
-    });
-
-    // Save position periodically (every 3 seconds)
-    setInterval(savePlaybackPosition, 3000);
-
-    // Clean up object URLs before unloading the page
-    window.addEventListener("beforeunload", () => {
-      if (audioPlayer.value?.src.startsWith("blob:")) {
-        URL.revokeObjectURL(audioPlayer.value.src);
-      }
-    });
   } catch (error) {
-    console.error("Failed to initialize:", error);
-    errorMessage.value =
-      "Failed to initialize the application. Please refresh the page.";
+    console.error("Error initializing app:", error);
+    errorMessage.value = "Failed to initialize app. Please refresh the page.";
   }
 });
 
-watch(volume, (newVolume) => {
-  setVolume(newVolume);
+onBeforeUnmount(() => {
+  // Clean up
+  if (audioPlayer.value) {
+    audioPlayer.value.pause();
+    audioPlayer.value.removeEventListener("timeupdate", updateProgress);
+    audioPlayer.value.removeEventListener("ended", playNext);
+  }
+
+  // Save current position
+  savePlaybackPosition();
+});
+
+// Watch for changes to save data
+watch(volume, () => {
+  localStorage.setItem("audioVolume", volume.value.toString());
 });
 </script>
 
-<template>
-  <div class="book-fetcher">
-    <h1>KVU Offline</h1>
-    <p class="description">
-      Enter a book URL from knigavuhe.org to download for offline listening
-    </p>
-
-    <div class="input-form">
-      <input
-        type="text"
-        v-model="bookUrl"
-        placeholder="https://knigavuhe.org/book/example-book/"
-        class="url-input"
-        :disabled="isLoading"
-      />
-      <button
-        @click="fetchBookData"
-        class="download-button"
-        :disabled="isLoading || !bookUrl"
-      >
-        <span v-if="isLoading" class="loading-spinner"></span>
-        {{ isLoading ? "Loading..." : "Search" }}
-      </button>
-    </div>
-
-    <div v-if="books.length > 0" class="book-switcher">
-      <button @click="showBooksList = !showBooksList" class="library-button">
-        <span class="icon">📚</span> Your Library ({{ books.length }})
-      </button>
-
-      <div v-if="showBooksList" class="books-list">
-        <div class="books-list-header">
-          <h3>Your Books</h3>
-          <button @click="showBooksList = false" class="close-button">×</button>
-        </div>
-        <div class="books-list-content">
-          <div
-            v-for="book in books"
-            :key="book.id"
-            @click="
-              switchBook(book.id);
-              showBooksList = false;
-            "
-            class="book-item"
-            :class="{ active: currentBook && currentBook.id === book.id }"
-          >
-            <div class="book-item-title">{{ book.title }}</div>
-            <div class="book-item-info">
-              <span>{{ book.totalFiles }} tracks</span>
-              <span class="bullet">•</span>
-              <span>{{ formatDuration(book.totalDuration) }}</span>
-              <span class="bullet">•</span>
-              <span>{{ book.downloadedCount }}/{{ book.totalFiles }} downloaded</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="errorMessage" class="error-message">
-      {{ errorMessage }}
-    </div>
-
-    <div v-if="currentBook && audioFiles.length > 0" class="results">
-      <div class="book-info-header">
-        <h2>{{ currentBook.title }}</h2>
-        <div class="book-stats">
-          <span>{{ audioFiles.length }} tracks</span>
-          <span class="bullet">•</span>
-          <span>Total duration: {{ formatDuration(currentBook.totalDuration) }}</span>
-          <span class="bullet">•</span>
-          <span
-            >Downloaded: {{ currentBook.downloadedCount }}/{{
-              currentBook.totalFiles
-            }}</span
-          >
-        </div>
-      </div>
-
-      <!-- Unified Audio Player -->
-      <div class="audio-player-wrapper">
-        <div class="player-info">
-          <div v-if="currentFile" class="now-playing">
-            Now Playing: {{ currentFileIndex + 1 }}. {{ currentFile.title }}
-          </div>
-          <div v-else class="now-playing">Select a file to play</div>
-        </div>
-
-        <div class="player-controls">
-          <button
-            @click="playPrevious"
-            class="control-button"
-            :disabled="!currentFile || currentFileIndex === 0"
-          >
-            ⏮️
-          </button>
-          <button
-            v-if="!isPlaying"
-            @click="playAudio"
-            class="control-button play-button"
-            :disabled="!currentFile"
-          >
-            ▶️
-          </button>
-          <button v-else @click="pauseAudio" class="control-button pause-button">
-            ⏸️
-          </button>
-          <button
-            @click="playNext"
-            class="control-button"
-            :disabled="!currentFile || currentFileIndex >= audioFiles.length - 1"
-          >
-            ⏭️
-          </button>
-        </div>
-
-        <div class="progress-container" @click="seek">
-          <div class="progress-bar" :style="{ width: `${progress}%` }"></div>
-        </div>
-
-        <div class="time-display">
-          <span>{{ formatDuration(currentTime) }}</span>
-          <span> / </span>
-          <span>{{ formatDuration(duration) }}</span>
-        </div>
-
-        <div class="volume-control">
-          <input type="range" min="0" max="1" step="0.01" v-model.number="volume" />
-        </div>
-      </div>
-
-      <div class="download-container">
-        <button
-          @click="downloadBook"
-          class="download-button"
-          :disabled="currentBook.downloadedCount === currentBook.totalFiles"
-        >
-          <span class="download-icon">⬇️</span>
-          {{
-            currentBook.downloadedCount === currentBook.totalFiles
-              ? "Downloaded"
-              : "Download Book"
-          }}
-        </button>
-      </div>
-
-      <table class="audio-files-table">
-        <thead>
-          <tr>
-            <th width="5%">#</th>
-            <th width="60%">Title</th>
-            <th width="15%">Duration</th>
-            <th width="20%">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="(file, index) in audioFiles"
-            :key="file.id"
-            @click="
-              currentFileIndex = index;
-              playAudio();
-            "
-            :class="{
-              playing: currentFileIndex === index,
-              downloaded: file.downloaded,
-            }"
-          >
-            <td>{{ index + 1 }}</td>
-            <td class="file-title">{{ file.title }}</td>
-            <td>{{ file.duration }}</td>
-            <td class="status">
-              <span v-if="file.downloaded" class="status-downloaded">
-                <span class="icon">✅</span> Downloaded
-              </span>
-              <span v-else class="status-pending">
-                <span class="icon">⏳</span> Pending
-              </span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-</template>
-
 <style scoped>
 .book-fetcher {
-  width: 100%;
-  max-width: 900px;
+  max-width: 960px;
   margin: 0 auto;
   padding: 20px;
+  font-family: Arial, sans-serif;
 }
 
 h1 {
-  text-align: center;
-  color: #2c3e50;
+  color: #333;
   margin-bottom: 10px;
+  font-size: 1.8em;
 }
 
 .description {
-  text-align: center;
   color: #666;
-  margin-bottom: 30px;
+  margin-bottom: 20px;
+  font-size: 0.9em;
 }
 
 .input-form {
   display: flex;
   margin-bottom: 20px;
-  position: relative;
 }
 
 .url-input {
   flex: 1;
-  padding: 12px 15px;
+  padding: 10px;
   border: 1px solid #ddd;
   border-radius: 4px 0 0 4px;
-  font-size: 16px;
-  transition: border-color 0.3s;
 }
 
 .url-input:focus {
   outline: none;
-  border-color: #4caf50;
+  border-color: #3498db;
 }
 
 .download-button {
-  padding: 12px 20px;
-  background-color: #4caf50;
+  background-color: #3498db;
   color: white;
   border: none;
   border-radius: 0 4px 4px 0;
+  padding: 0 15px;
   cursor: pointer;
-  font-size: 16px;
-  font-weight: bold;
-  transition: background-color 0.3s;
-  position: relative;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
 }
 
 .loading-spinner {
-  display: inline-block;
   width: 16px;
   height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  border: 2px solid #ffffff;
+  border-top: 2px solid transparent;
   border-radius: 50%;
-  border-top-color: #fff;
-  animation: spin 1s ease-in-out infinite;
   margin-right: 8px;
+  animation: spin 1s linear infinite;
 }
 
 @keyframes spin {
-  to {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
     transform: rotate(360deg);
   }
 }
 
 .download-button:hover {
-  background-color: #45a049;
+  background-color: #2980b9;
 }
 
 .download-button:disabled {
-  background-color: #cccccc;
+  background-color: #95a5a6;
   cursor: not-allowed;
 }
 
 .error-message {
-  color: #d9534f;
-  background-color: #f9f2f2;
-  padding: 15px;
+  color: #e74c3c;
+  padding: 10px;
+  background-color: #fadbd8;
   border-radius: 4px;
   margin-bottom: 20px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  font-size: 0.9em;
 }
 
 .results {
-  margin-top: 30px;
-  background-color: white;
+  margin-top: 20px;
+  background-color: #f9f9f9;
+  padding: 15px;
   border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  padding: 20px;
 }
 
 .book-info-header {
-  border-bottom: 1px solid #eee;
-  padding-bottom: 15px;
-  margin-bottom: 20px;
+  margin-bottom: 15px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eaeaea;
 }
 
 .book-info-header h2 {
-  margin-top: 0;
-  margin-bottom: 10px;
-  color: #2c3e50;
+  margin: 0 0 5px 0;
+  font-size: 1.5em;
+  color: #333;
 }
 
 .book-stats {
   color: #666;
-  margin-bottom: 15px;
+  font-size: 0.9em;
 }
 
 .bullet {
   margin: 0 8px;
+  color: #ccc;
 }
 
 .audio-files-table {
   width: 100%;
   border-collapse: collapse;
+  margin-top: 15px;
 }
 
 .audio-files-table th,
 .audio-files-table td {
-  border-bottom: 1px solid #eee;
-  padding: 12px 8px;
+  padding: 10px;
   text-align: left;
+  border-bottom: 1px solid #eaeaea;
+  font-size: 0.9em;
 }
 
 .audio-files-table th {
+  font-weight: 500;
+  color: #666;
   background-color: #f5f5f5;
-  font-weight: bold;
-  color: #555;
 }
 
 .audio-files-table tr:hover {
@@ -1120,181 +933,117 @@ h1 {
 }
 
 .action-link {
-  background-color: #3498db;
-  color: white;
-  padding: 8px 12px;
-  border-radius: 4px;
+  color: #3498db;
   text-decoration: none;
-  margin-right: 6px;
+  margin-right: 10px;
+  font-size: 0.85em;
   display: inline-flex;
   align-items: center;
-  transition: background-color 0.2s;
 }
 
 .icon {
-  margin-right: 5px;
+  margin-right: 4px;
 }
 
 .action-link:hover {
-  background-color: #2980b9;
+  color: #2980b9;
 }
 
 .action-buttons {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .download-buttons {
   display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
+  justify-content: center;
+  margin-top: 10px;
 }
 
 .audio-player-wrapper {
-  background-color: #f8f8f8;
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-top: 25px;
+  padding: 15px;
+  background-color: #f5f5f5;
+  border-radius: 8px;
 }
 
 .player-info {
-  margin-bottom: 15px;
+  margin-bottom: 10px;
 }
 
 .now-playing {
-  font-weight: bold;
-  color: #2c3e50;
+  font-size: 0.9em;
+  color: #333;
 }
 
 .player-controls {
   display: flex;
   align-items: center;
-  justify-content: center;
-  margin-bottom: 15px;
-  gap: 20px;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .control-button {
   background: none;
   border: none;
-  font-size: 24px;
+  width: 36px;
+  height: 36px;
   cursor: pointer;
-  opacity: 0.8;
-  transition: all 0.2s;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .control-button:hover {
-  opacity: 1;
-  transform: scale(1.1);
+  background-color: rgba(0, 0, 0, 0.05);
 }
 
 .control-button:disabled {
-  opacity: 0.3;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .play-button,
 .pause-button {
-  font-size: 32px;
+  width: 42px;
+  height: 42px;
 }
 
 .progress-container {
-  height: 8px;
-  background-color: #e1e1e1;
-  border-radius: 4px;
-  margin-bottom: 10px;
+  flex: 1;
+  height: 6px;
+  background-color: #ddd;
+  border-radius: 3px;
   cursor: pointer;
+  position: relative;
   overflow: hidden;
 }
 
 .progress-bar {
   height: 100%;
-  background-color: #4caf50;
-  border-radius: 4px;
+  background-color: #3498db;
+  width: 0;
   transition: width 0.1s linear;
 }
 
 .time-display {
-  display: flex;
-  justify-content: space-between;
+  font-size: 0.75em;
   color: #666;
-  font-size: 14px;
-  margin-bottom: 15px;
+  white-space: nowrap;
+  margin-left: 5px;
+  min-width: 80px;
+  text-align: center;
 }
 
 .volume-control {
-  width: 100%;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  margin-left: 10px;
 }
 
 .volume-control input[type="range"] {
-  width: 120px;
-}
-
-.download-container {
-  margin-bottom: 15px;
-  text-align: right;
-}
-
-.download-button {
-  padding: 10px 15px;
-  background-color: #4caf50;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-weight: bold;
-  display: inline-flex;
-  align-items: center;
-  transition: background-color 0.2s;
-}
-
-.download-button:disabled {
-  background-color: #cccccc;
-  cursor: not-allowed;
-}
-
-.download-icon {
-  margin-right: 8px;
-}
-
-.download-button:not(:disabled):hover {
-  background-color: #45a049;
-}
-
-.download-progress-container {
-  position: fixed;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  background-color: white;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
-  padding: 15px;
-  border-radius: 8px;
-  width: 300px;
-  z-index: 1000;
-}
-
-.download-progress-text {
-  margin-bottom: 8px;
-  font-weight: bold;
-}
-
-.download-progress-bar-bg {
-  height: 10px;
-  background-color: #eee;
-  border-radius: 5px;
-  overflow: hidden;
-}
-
-.download-progress-bar {
-  height: 100%;
-  background-color: #4caf50;
-  transition: width 0.3s;
+  width: 80px;
 }
 
 @media (max-width: 768px) {
@@ -1306,171 +1055,26 @@ h1 {
   .download-button {
     width: 100%;
     border-radius: 4px;
-  }
-
-  .url-input {
     margin-bottom: 10px;
-  }
-
-  .now-playing {
-    font-size: 14px;
-  }
-
-  .control-button {
-    font-size: 20px;
-  }
-
-  .play-button,
-  .pause-button {
-    font-size: 28px;
   }
 
   .audio-files-table th,
   .audio-files-table td {
-    padding: 8px;
-    font-size: 14px;
+    padding: 8px 5px;
+    font-size: 0.8em;
   }
 
-  .audio-files-table {
-    display: block;
-    overflow-x: auto;
+  .progress-container {
+    flex: 1;
+    min-width: 100px;
   }
 
-  .download-container {
-    text-align: center;
-  }
-
-  .download-button {
-    width: 100%;
-  }
-
-  .volume-control {
+  .player-controls {
     justify-content: center;
-    margin-top: 10px;
   }
 
-  .volume-control input[type="range"] {
-    width: 80%;
+  .time-display {
+    font-size: 0.7em;
   }
-
-  .book-info-header {
-    text-align: center;
-  }
-}
-/* Table styles */
-.playing {
-  background-color: rgba(76, 175, 80, 0.1) !important;
-}
-
-.downloaded {
-  position: relative;
-}
-
-/* We're using status indicators instead of this decoration */
-
-.status {
-  text-align: center;
-}
-
-.status-downloaded {
-  color: #4caf50;
-  font-weight: bold;
-}
-
-.status-pending {
-  color: #999;
-}
-
-/* Book switcher styles */
-.book-switcher {
-  margin: 15px 0;
-  position: relative;
-}
-
-.library-button {
-  background-color: #3498db;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  padding: 10px 15px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  font-weight: bold;
-}
-
-.library-button:hover {
-  background-color: #2980b9;
-}
-
-.library-button .icon {
-  margin-right: 8px;
-}
-
-.books-list {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  width: 100%;
-  background-color: white;
-  border-radius: 4px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
-  z-index: 1000;
-  margin-top: 5px;
-}
-
-.books-list-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 15px;
-  border-bottom: 1px solid #eee;
-}
-
-.books-list-header h3 {
-  margin: 0;
-}
-
-.close-button {
-  background: none;
-  border: none;
-  font-size: 24px;
-  cursor: pointer;
-  color: #999;
-}
-
-.close-button:hover {
-  color: #333;
-}
-
-.books-list-content {
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.book-item {
-  padding: 15px;
-  border-bottom: 1px solid #eee;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.book-item:hover {
-  background-color: #f9f9f9;
-}
-
-.book-item.active {
-  background-color: rgba(76, 175, 80, 0.1);
-}
-
-.book-item-title {
-  font-weight: bold;
-  margin-bottom: 5px;
-  color: #2c3e50;
-}
-
-.book-item-info {
-  font-size: 12px;
-  color: #666;
 }
 </style>

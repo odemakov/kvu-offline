@@ -1,10 +1,10 @@
 export interface AudioFile {
   id: string;
+  bookId: string; // Foreign key to Book
   url: string;
   title: string;
-  duration: string;
   downloaded: boolean;
-  durationSeconds?: number;
+  duration: number;
   blob?: Blob;
 }
 
@@ -12,8 +12,10 @@ export interface Book {
   id: string;
   url: string;
   title: string;
-  files: AudioFile[];
-  totalDuration: number;
+  authors: string;
+  cover: string;
+  readers: string;
+  duration: number;
   downloadedCount: number;
   totalFiles: number;
   lastAccessTime?: number; // Timestamp when the book was last accessed

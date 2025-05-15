@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, onMounted } from "vue";
 import BookFetcher from "./components/BookFetcher.vue";
 import { useInstallPWA } from "./composables/useInstallPWA";
 
@@ -9,6 +9,8 @@ const installBannerVisible = ref(true);
 function hideInstallBanner() {
   installBannerVisible.value = false;
 }
+
+onMounted(async () => {});
 </script>
 
 <template>
@@ -139,6 +141,17 @@ body {
 
 .dismiss-button:hover {
   background-color: #f5f5f5;
+}
+
+.migration-banner {
+  background-color: var(--secondary-color);
+  color: white;
+  text-align: center;
+  padding: 10px;
+}
+
+.migration-banner.error {
+  background-color: var(--danger-color);
 }
 
 @media (max-width: 768px) {
