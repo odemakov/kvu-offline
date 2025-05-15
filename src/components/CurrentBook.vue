@@ -62,7 +62,7 @@
 </template>
 
 <script setup lang="ts">
-import { Book, AudioFile } from "../types/AudioFile";
+import { type Book, type AudioFile } from "../types/AudioFile";
 import { formatDuration } from "../utils/htmlUtils";
 
 defineProps<{
@@ -80,6 +80,7 @@ defineEmits<{
 <style scoped>
 .current-book {
   margin-top: 20px;
+  min-width: 700px;
 }
 
 .book-info-header {

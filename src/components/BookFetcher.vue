@@ -21,7 +21,7 @@
           <div class="loading-spinner"></div>
           Loading...
         </template>
-        <template v-else> <span class="icon">↓</span> Fetch </template>
+        <template v-else> <span class="icon">↓</span> Read </template>
       </button>
     </div>
 
@@ -41,6 +41,19 @@
       @close="showBooksList = false"
     />
 
+    <AudioPlayer
+      v-if="audioFiles.length > 0 && currentFile"
+      :currentFile="currentFile"
+      :files="audioFiles"
+      :currentFileIndex="currentFileIndex"
+      :currentBook="currentBook"
+      :isPlaying="isPlaying"
+      @previous="playPrevious"
+      @next="playNext"
+      @update:currentTime="currentTime = $event"
+      @savePlaybackPosition="savePlaybackPosition"
+    />
+
     <CurrentBook
       :book="currentBook"
       :files="audioFiles"
@@ -48,49 +61,6 @@
       @play-file="playFileById"
       @download-file="downloadFileById"
     />
-
-    <!-- Audio Player -->
-    <div class="audio-player-wrapper" v-if="audioFiles.length > 0 && currentFile">
-      <div class="player-info">
-        <div class="now-playing">
-          <strong>Now Playing:</strong> {{ currentFile.title }}
-        </div>
-      </div>
-
-      <div class="player-controls">
-        <button @click="playPrevious" class="control-button" :disabled="!hasPrevious">
-          <span class="icon">⏮</span>
-        </button>
-        <button v-if="!isPlaying" @click="playAudio" class="control-button play-button">
-          <span class="icon">▶</span>
-        </button>
-        <button v-else @click="pauseAudio" class="control-button pause-button">
-          <span class="icon">⏸</span>
-        </button>
-        <button @click="playNext" class="control-button" :disabled="!hasNext">
-          <span class="icon">⏭</span>
-        </button>
-
-        <div class="progress-container" @click="seek">
-          <div class="progress-bar" :style="{ width: progress + '%' }"></div>
-        </div>
-
-        <div class="time-display">
-          {{ formatTime(currentTime) }} / {{ formatTime(duration) }}
-        </div>
-
-        <div class="volume-control">
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            v-model="volume"
-            @input="setVolume"
-          />
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -99,6 +69,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import { type AudioFile, type Book } from "../types/AudioFile";
 import LibraryList from "./LibraryList.vue";
 import CurrentBook from "./CurrentBook.vue";
+import AudioPlayer from "./AudioPlayer.vue";
 import { createHash, validateUrl } from "../utils/htmlUtils";
 import { fetchProxiedHTML, downloadProxiedFile } from "../utils/proxyUtils";
 
@@ -119,28 +90,13 @@ const currentBook = ref<Book | null>(null);
 const showBooksList = ref(false);
 
 // Audio player state
-const audioPlayer = ref<HTMLAudioElement | null>(null);
 const isPlaying = ref(false);
 const currentFileIndex = ref(0);
 const currentTime = ref(0);
-const duration = ref(0);
-const volume = ref(0.75);
 
 // Computed properties
-const progress = computed(() => {
-  return duration.value > 0 ? (currentTime.value / duration.value) * 100 : 0;
-});
-
 const currentFile = computed(() => {
   return audioFiles.value.length > 0 ? audioFiles.value[currentFileIndex.value] : null;
-});
-
-const hasNext = computed(() => {
-  return currentFileIndex.value < audioFiles.value.length - 1;
-});
-
-const hasPrevious = computed(() => {
-  return currentFileIndex.value > 0;
 });
 
 // Initialize the database
@@ -277,7 +233,6 @@ async function loadBookFiles(bookId: string): Promise<void> {
           currentFileIndex.value = lastPlayedIndex;
 
           currentTime.value = currentBook.value.lastPlayedTime || 0;
-          duration.value = audioFiles.value[lastPlayedIndex].durationSeconds || 0;
         }
       }
 
@@ -294,10 +249,7 @@ async function loadBookFiles(bookId: string): Promise<void> {
 // Switch to another book in the library
 async function switchBook(bookId: string) {
   showBooksList.value = false;
-  if (audioPlayer.value) {
-    audioPlayer.value.pause();
-    isPlaying.value = false;
-  }
+  isPlaying.value = false;
 
   // Save current playback position before switching
   if (currentBook.value && currentFile.value) {
@@ -324,9 +276,10 @@ async function switchBook(bookId: string) {
       if (fileIndex !== -1) {
         currentFileIndex.value = fileIndex;
         currentTime.value = book.lastPlayedTime || 0;
+        // Set a small delay before starting playback to allow component to update
         setTimeout(() => {
-          playAudio();
-        }, 500);
+          isPlaying.value = true;
+        }, 300);
       }
     }
   }
@@ -370,7 +323,6 @@ async function saveBook(book: Book): Promise<void> {
       // Save as last book
       localStorage.setItem("lastBookId", book.id);
 
-      console.log("File saved successfully");
       resolve();
     };
     request.onerror = (event) => {
@@ -400,7 +352,6 @@ async function saveFile(file: AudioFile): Promise<void> {
     const request = store.put(fileToSave);
 
     request.onsuccess = () => {
-      console.log("File saved successfully");
       resolve();
     };
     request.onerror = (event) => {
@@ -557,7 +508,17 @@ function playFileById(fileId: string) {
   const fileIndex = audioFiles.value.findIndex((file) => file.id === fileId);
   if (fileIndex !== -1) {
     currentFileIndex.value = fileIndex;
-    playAudio();
+    isPlaying.value = true;
+
+    // If this is the file that was last played, and we have a saved position, use it
+    if (currentBook.value && currentBook.value.lastPlayedFile === fileId) {
+      currentTime.value = currentBook.value.lastPlayedTime || 0;
+    } else if (currentBook.value) {
+      // Update the book's last played file
+      currentBook.value.lastPlayedFile = fileId;
+      currentBook.value.lastPlayedTime = 0;
+      saveBook(currentBook.value);
+    }
   }
 }
 
@@ -591,134 +552,32 @@ async function downloadFileById(fileId: string) {
   }
 }
 
-// Play the current audio file
-async function playAudio() {
-  if (!currentFile.value) return;
-
-  // If there's no audio player element yet, create one
-  if (!audioPlayer.value) {
-    audioPlayer.value = new Audio();
-    audioPlayer.value.volume = volume.value;
-
-    // Set up event listeners
-    audioPlayer.value.addEventListener("timeupdate", updateProgress);
-    audioPlayer.value.addEventListener("ended", playNext);
-    audioPlayer.value.addEventListener("loadedmetadata", () => {
-      duration.value = audioPlayer.value?.duration || 0;
-    });
-  }
-
-  // Reset the player
-  audioPlayer.value.pause();
-
-  try {
-    // Set up the audio source
-    if (currentFile.value.downloaded && currentFile.value.blob) {
-      // Use the downloaded blob
-      audioPlayer.value.src = URL.createObjectURL(currentFile.value.blob);
-    } else {
-      // Stream from URL
-      audioPlayer.value.src = currentFile.value.url;
-    }
-
-    // Set the current time if we have a saved position
-    if (
-      currentBook.value &&
-      currentBook.value.lastPlayedFile === currentFile.value.id &&
-      currentBook.value.lastPlayedTime
-    ) {
-      currentTime.value = currentBook.value.lastPlayedTime;
-      audioPlayer.value.currentTime = currentTime.value;
-    } else {
-      currentTime.value = 0;
-    }
-
-    // Play the audio
-    await audioPlayer.value.play();
-    isPlaying.value = true;
-
-    // Update book's last played info
-    if (currentBook.value) {
-      currentBook.value.lastPlayedFile = currentFile.value.id;
-      saveBook(currentBook.value);
-    }
-  } catch (error) {
-    console.error("Error playing audio:", error);
-    errorMessage.value = "Failed to play audio. Please try again.";
-    isPlaying.value = false;
-  }
-}
-
-// Pause the current audio
-function pauseAudio() {
-  if (!audioPlayer.value) return;
-
-  audioPlayer.value.pause();
-  isPlaying.value = false;
-
-  // Save current position
-  savePlaybackPosition();
-}
-
 // Play the previous file
 function playPrevious() {
   if (currentFileIndex.value > 0) {
-    // Save current position before switching
     savePlaybackPosition();
-
     currentFileIndex.value--;
-    playAudio();
+    isPlaying.value = true;
   }
 }
 
 // Play the next file
 function playNext() {
   if (currentFileIndex.value < audioFiles.value.length - 1) {
-    // Save current position before switching
     savePlaybackPosition();
-
     currentFileIndex.value++;
-    playAudio();
+    isPlaying.value = true;
   } else {
-    // End of playlist
     isPlaying.value = false;
   }
 }
 
-// Update progress based on audio player's current time
-function updateProgress() {
-  if (!audioPlayer.value) return;
-
-  currentTime.value = audioPlayer.value.currentTime;
-}
-
-// Seek to position in the audio
-function seek(event: MouseEvent) {
-  if (!audioPlayer.value || !duration.value) return;
-
-  const progressContainer = event.currentTarget as HTMLElement;
-  const { left, width } = progressContainer.getBoundingClientRect();
-  const clickPosition = (event.clientX - left) / width;
-
-  const newTime = clickPosition * duration.value;
-  audioPlayer.value.currentTime = newTime;
-  currentTime.value = newTime;
-}
-
-// Set the volume
-function setVolume() {
-  if (!audioPlayer.value) return;
-
-  audioPlayer.value.volume = volume.value;
-  localStorage.setItem("audioVolume", volume.value.toString());
-}
-
 // Save the current playback position
 function savePlaybackPosition() {
-  if (!currentBook.value || !currentFile.value || !audioPlayer.value) return;
+  if (!currentBook.value || !currentFile.value) return;
 
   currentBook.value.lastPlayedFile = currentFile.value.id;
-  currentBook.value.lastPlayedTime = audioPlayer.value.currentTime;
+  currentBook.value.lastPlayedTime = currentTime.value;
 
   saveBook(currentBook.value);
 }
@@ -728,33 +587,11 @@ function toggleLibrary() {
   showBooksList.value = !showBooksList.value;
 }
 
-// Format time in seconds to MM:SS or HH:MM:SS
-function formatTime(seconds: number): string {
-  if (!seconds) return "0:00";
-
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-
-  const formattedMinutes = minutes < 10 && hours > 0 ? `0${minutes}` : minutes;
-  const formattedSeconds = secs < 10 ? `0${secs}` : secs;
-
-  return hours > 0
-    ? `${hours}:${formattedMinutes}:${formattedSeconds}`
-    : `${formattedMinutes}:${formattedSeconds}`;
-}
-
 // Lifecycle hooks
 onMounted(async () => {
   try {
     await initDB();
     await loadBooks();
-
-    // Load saved volume
-    const savedVolume = localStorage.getItem("audioVolume");
-    if (savedVolume) {
-      volume.value = parseFloat(savedVolume);
-    }
   } catch (error) {
     console.error("Error initializing app:", error);
     errorMessage.value = "Failed to initialize app. Please refresh the page.";
@@ -762,20 +599,11 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
-  // Clean up
-  if (audioPlayer.value) {
-    audioPlayer.value.pause();
-    audioPlayer.value.removeEventListener("timeupdate", updateProgress);
-    audioPlayer.value.removeEventListener("ended", playNext);
-  }
-
   // Save current position
   savePlaybackPosition();
-});
 
-// Watch for changes to save data
-watch(volume, () => {
-  localStorage.setItem("audioVolume", volume.value.toString());
+  // Stop playback
+  isPlaying.value = false;
 });
 </script>
 
@@ -952,92 +780,6 @@ h1 {
   margin-top: 10px;
 }
 
-.audio-player-wrapper {
-  margin-top: 25px;
-  padding: 15px;
-  background-color: #f5f5f5;
-  border-radius: 8px;
-}
-
-.player-info {
-  margin-bottom: 10px;
-}
-
-.now-playing {
-  font-size: 0.9em;
-  color: #333;
-}
-
-.player-controls {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.control-button {
-  background: none;
-  border: none;
-  width: 36px;
-  height: 36px;
-  cursor: pointer;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.control-button:hover {
-  background-color: rgba(0, 0, 0, 0.05);
-}
-
-.control-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.play-button,
-.pause-button {
-  width: 42px;
-  height: 42px;
-}
-
-.progress-container {
-  flex: 1;
-  height: 6px;
-  background-color: #ddd;
-  border-radius: 3px;
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-}
-
-.progress-bar {
-  height: 100%;
-  background-color: #3498db;
-  width: 0;
-  transition: width 0.1s linear;
-}
-
-.time-display {
-  font-size: 0.75em;
-  color: #666;
-  white-space: nowrap;
-  margin-left: 5px;
-  min-width: 80px;
-  text-align: center;
-}
-
-.volume-control {
-  display: flex;
-  align-items: center;
-  margin-left: 10px;
-}
-
-.volume-control input[type="range"] {
-  width: 80px;
-}
-
 @media (max-width: 768px) {
   .input-form {
     flex-direction: column;
@@ -1054,19 +796,6 @@ h1 {
   .audio-files-table td {
     padding: 8px 5px;
     font-size: 0.8em;
-  }
-
-  .progress-container {
-    flex: 1;
-    min-width: 100px;
-  }
-
-  .player-controls {
-    justify-content: center;
-  }
-
-  .time-display {
-    font-size: 0.7em;
   }
 }
 </style>
