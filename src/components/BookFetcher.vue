@@ -8,6 +8,8 @@ import {
   createHash,
 } from "../utils/htmlUtils";
 
+import { fetchProxiedHTML, downloadProxiedFile } from "../utils/proxyUtils";
+
 // IndexedDB setup
 const DB_NAME = "kvu-offline-db";
 const DB_VERSION = 1;
@@ -334,29 +336,7 @@ async function downloadBook() {
     }
 
     try {
-      let blob;
-      try {
-        const response = await fetch("/kvu-offline/api/proxy-data", {
-          cache: "no-store",
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            // Range: "bytes=0-",
-            // Accept: "audio/mpeg, audio/*",
-          },
-          body: JSON.stringify({ url: file.url }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        // Get the MP3 as a blob
-        blob = await response.blob();
-      } catch (e) {
-        console.error(`Failed to download file ${file.title} from primary URL:`, e);
-      }
-      console.log(blob);
+      const blob = await downloadProxiedFile(file.url);
 
       // Verify we got an audio file (check MIME type)
       if (blob && (!blob.type || !blob.type.includes("audio/"))) {
@@ -416,19 +396,7 @@ async function fetchBookData() {
     }
 
     // Fetch the HTML content
-    const response = await fetch("/kvu-offline/api/proxy-html", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ url: bookUrl.value }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch book data: ${response.statusText}`);
-    }
-
-    const html = await response.text();
+    const html = await fetchProxiedHTML(bookUrl.value);
 
     // Create a DOM parser to parse the HTML
     const parser = new DOMParser();
