@@ -29,7 +29,7 @@
 </template>
 
 <script setup lang="ts">
-import { Book } from "../types/AudioFile";
+import { type Book } from "../types/AudioFile";
 
 defineProps<{
   books: Book[];

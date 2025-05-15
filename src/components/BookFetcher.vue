@@ -65,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { type AudioFile, type Book } from "../types/AudioFile";
 import LibraryList from "./LibraryList.vue";
 import CurrentBook from "./CurrentBook.vue";
