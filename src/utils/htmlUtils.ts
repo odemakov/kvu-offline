@@ -69,15 +69,3 @@ export function validateUrl(url: string): boolean {
   // Simple validation: must be a knigavuhe.org URL
   return normalizedUrl.includes("knigavuhe.org") && normalizedUrl.length > 20;
 }
-
-//   // Calculate duration in seconds
-//   let durationSeconds = 0;
-//   const durationParts = duration.split(":");
-//   if (durationParts.length === 2) {
-//     durationSeconds = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
-//   } else if (durationParts.length === 3) {
-//     durationSeconds =
-//       parseInt(durationParts[0]) * 3600 +
-//       parseInt(durationParts[1]) * 60 +
-//       parseInt(durationParts[2]);
-//   }

@@ -3,11 +3,7 @@
     <div class="books-list" v-if="showLibrary">
       <div class="books-list-header">
         <h3>Your Library</h3>
-        <button
-          @click="$emit('close')"
-          class="close-button"
-          aria-label="Close library"
-        >
+        <button @click="$emit('close')" class="close-button" aria-label="Close library">
           <span class="icon">✕</span>
         </button>
       </div>
@@ -21,7 +17,7 @@
         >
           <div class="book-item-title">{{ book.title }}</div>
           <div class="book-item-info">
-            {{ book.totalFiles }} files · {{ formatDuration(book.totalDuration) }}
+            {{ book.totalFiles }} files · {{ formatDuration(book.duration) }}
           </div>
         </div>
         <div v-if="books.length === 0" class="no-books">
@@ -33,26 +29,25 @@
 </template>
 
 <script setup lang="ts">
-import { Book } from '../types/AudioFile';
-import { computed } from 'vue';
+import { Book } from "../types/AudioFile";
 
-const props = defineProps<{
+defineProps<{
   books: Book[];
   currentBookId: string | null;
   showLibrary: boolean;
 }>();
 
-const emit = defineEmits<{
-  (e: 'select-book', bookId: string): void;
-  (e: 'close'): void;
+defineEmits<{
+  (e: "select-book", bookId: string): void;
+  (e: "close"): void;
 }>();
 
 function formatDuration(seconds: number): string {
-  if (!seconds) return '0:00';
-  
+  if (!seconds) return "0:00";
+
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  
+
   if (hours > 0) {
     return `${hours}h ${minutes}m`;
   } else {
@@ -158,7 +153,7 @@ function formatDuration(seconds: number): string {
     max-height: 100%;
     border-radius: 0;
   }
-  
+
   .books-list-header {
     border-radius: 0;
   }

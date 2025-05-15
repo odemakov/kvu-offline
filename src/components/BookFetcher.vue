@@ -21,7 +21,7 @@
           <div class="loading-spinner"></div>
           Loading...
         </template>
-        <template v-else> <span class="icon">↓</span> Download </template>
+        <template v-else> <span class="icon">↓</span> Fetch </template>
       </button>
     </div>
 
@@ -334,14 +334,11 @@ async function switchBook(bookId: string) {
 
 // Save book to database
 async function saveBook(book: Book): Promise<void> {
-  console.log("Attempting to save book:", JSON.stringify(book, null, 2));
-  console.log("Book object keys:", Object.keys(book));
-  console.log("Book object:", book);
   return new Promise((resolve, reject) => {
     if (!db) return reject(new Error("Database not initialized"));
 
     const transaction = db.transaction(BOOKS_STORE, "readwrite");
-    const bookStore = transaction.objectStore(BOOKS_STORE);
+    const store = transaction.objectStore(BOOKS_STORE);
 
     // Create a clean copy with only serializable data
     // to avoid "Failed to execute 'put' on 'IDBObjectStore': #<Object> could not be cloned." error
@@ -359,11 +356,9 @@ async function saveBook(book: Book): Promise<void> {
       lastPlayedFile: book.lastPlayedFile,
       lastPlayedTime: book.lastPlayedTime,
     };
+    const request = store.put(bookToSave);
 
-    // Save the book
-    bookStore.put(bookToSave);
-
-    transaction.oncomplete = () => {
+    request.onsuccess = () => {
       // Update the local books array
       const index = books.value.findIndex((b) => b.id === book.id);
       if (index !== -1) {
@@ -375,12 +370,12 @@ async function saveBook(book: Book): Promise<void> {
       // Save as last book
       localStorage.setItem("lastBookId", book.id);
 
+      console.log("File saved successfully");
       resolve();
     };
-
-    transaction.onerror = (event) => {
-      console.error("Error saving book:", event);
-      reject("Failed to save book");
+    request.onerror = (event) => {
+      console.error("Error saving file:", event);
+      reject("Failed to save file");
     };
   });
 }
@@ -400,6 +395,7 @@ async function saveFile(file: AudioFile): Promise<void> {
       title: file.title,
       downloaded: file.downloaded,
       duration: file.duration,
+      blob: file.blob,
     };
     const request = store.put(fileToSave);
 
@@ -407,7 +403,6 @@ async function saveFile(file: AudioFile): Promise<void> {
       console.log("File saved successfully");
       resolve();
     };
-
     request.onerror = (event) => {
       console.error("Error saving file:", event);
       reject("Failed to save file");
@@ -476,7 +471,6 @@ async function fetchBookData() {
       const playerMatch = content.match(
         /var\s+player\s*=\s*new\s+BookPlayer\s*\(\s*\d+\s*,\s*(\[[\s\S]*?\])\s*[\s\S]*?\)/,
       );
-      console.log(playerMatch);
       if (playerMatch && playerMatch[1]) {
         try {
           // Clean the JSON string - replace single quotes with double quotes and remove trailing commas
@@ -488,7 +482,6 @@ async function fetchBookData() {
           const playlistData = JSON.parse(jsonStr);
           bookPlayerData = { playlist: playlistData };
           console.log("Successfully parsed BookPlayer data with first pattern");
-          console.log(bookPlayerData);
 
           break;
         } catch (e) {
@@ -539,7 +532,6 @@ async function fetchBookData() {
       downloaded: false,
     });
   });
-  console.log(files);
 
   // Check if book was created before updating duration
   if (book) {

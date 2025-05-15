@@ -4,11 +4,9 @@
     <div class="book-info-header">
       <h2>{{ book.title }}</h2>
       <div class="book-stats">
-        <span>{{ book.totalFiles }} files</span>
+        <span>{{ formatDuration(book.duration) }}</span>
         <span class="bullet">•</span>
-        <span>{{ formatDuration(book.totalDuration) }}</span>
-        <span class="bullet">•</span>
-        <span>{{ book.downloadedCount }} downloaded</span>
+        <span>{{ book.downloadedCount }}/{{ book.totalFiles }} files downloaded</span>
       </div>
     </div>
 
@@ -23,33 +21,33 @@
         </tr>
       </thead>
       <tbody>
-        <tr 
-          v-for="(file, index) in files" 
-          :key="file.id" 
+        <tr
+          v-for="(file, _) in files"
+          :key="file.id"
           :class="{ playing: currentFileId === file.id }"
         >
           <td class="file-title">{{ file.title }}</td>
-          <td>{{ file.duration }}</td>
+          <td>{{ formatDuration(file.duration) }}</td>
           <td>
-            <span 
-              class="status" 
+            <span
+              class="status"
               :class="file.downloaded ? 'status-downloaded' : 'status-pending'"
             >
-              {{ file.downloaded ? 'Downloaded' : 'Not Downloaded' }}
+              {{ file.downloaded ? "Downloaded" : "Not Downloaded" }}
             </span>
           </td>
           <td>
             <div class="action-buttons">
-              <a 
-                href="#" 
-                class="action-link" 
+              <a
+                href="#"
+                class="action-link"
                 @click.prevent="$emit('play-file', file.id)"
               >
                 <span class="icon">▶</span> Play
               </a>
-              <a 
-                href="#" 
-                class="action-link" 
+              <a
+                href="#"
+                class="action-link"
                 @click.prevent="$emit('download-file', file.id)"
                 v-if="!file.downloaded"
               >
@@ -64,35 +62,19 @@
 </template>
 
 <script setup lang="ts">
-import { Book, AudioFile } from '../types/AudioFile';
-import { computed } from 'vue';
+import { Book, AudioFile } from "../types/AudioFile";
+import { formatDuration } from "../utils/htmlUtils";
 
-const props = defineProps<{
+defineProps<{
   book: Book | null;
   files: AudioFile[];
   currentFileId: string | null;
 }>();
 
-const emit = defineEmits<{
-  (e: 'play-file', fileId: string): void;
-  (e: 'download-file', fileId: string): void;
+defineEmits<{
+  (e: "play-file", fileId: string): void;
+  (e: "download-file", fileId: string): void;
 }>();
-
-function formatDuration(seconds: number): string {
-  if (!seconds) return '0:00';
-  
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const remainingSeconds = Math.floor(seconds % 60);
-  
-  if (hours > 0) {
-    return `${hours}h ${minutes}m ${remainingSeconds}s`;
-  } else if (minutes > 0) {
-    return `${minutes}m ${remainingSeconds}s`;
-  } else {
-    return `${remainingSeconds}s`;
-  }
-}
 </script>
 
 <style scoped>
@@ -128,7 +110,7 @@ function formatDuration(seconds: number): string {
   margin-top: 15px;
 }
 
-.audio-files-table th, 
+.audio-files-table th,
 .audio-files-table td {
   padding: 10px;
   text-align: left;
@@ -192,12 +174,12 @@ function formatDuration(seconds: number): string {
 }
 
 @media (max-width: 768px) {
-  .audio-files-table th, 
+  .audio-files-table th,
   .audio-files-table td {
     padding: 8px 5px;
     font-size: 0.8em;
   }
-  
+
   .audio-files-table {
     font-size: 0.9em;
   }
@@ -205,7 +187,7 @@ function formatDuration(seconds: number): string {
   .book-info-header {
     margin-bottom: 10px;
   }
-  
+
   .book-info-header h2 {
     font-size: 1.3em;
   }
