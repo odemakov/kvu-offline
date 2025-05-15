@@ -1,0 +1,26 @@
+
+services:
+  nginx:
+    build:
+      context: .
+      target: nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - node
+    restart: unless-stopped
+
+  node:
+    build:
+      context: .
+      target: node
+    expose:
+      - "3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    restart: unless-stopped
+
+networks:
+  default:
+    driver: overlay

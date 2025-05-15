@@ -14,50 +14,29 @@ KVU Offline is a Progressive Web Application (PWA) designed to enable offline li
 ### Prerequisites
 
 - Node.js 16.x or higher
-- npm or yarn
 
 ### Installation
 
 1. Clone this repository:
    ```
-   git clone https://github.com/yourusername/kvu-offline.git
+   git clone https://github.com/odemakov/kvu-offline.git
    cd kvu-offline
    ```
 
-2. Install dependencies:
+2. Run development server:
    ```
-   npm install
-   ```
-
-3. Run development server:
-   ```
-   npm run dev
+   make dev
    ```
 
-4. Build for production:
+3. Build production server:
    ```
-   npm run build
+   make build
    ```
 
-## How to Use
-
-1. Enter a URL from knigavuhe.org in the input field
-2. Click "Download" to fetch the book information
-3. The app will list all available audio files with their titles and durations
-4. You can listen to or download individual files
-
-## Development Roadmap
-
-This is stage 1 of a multi-phase project:
-
-- Stage 1: ✅ Basic book fetching and MP3 listing functionality
-- Stage 2: Implementing a player with playback controls
-- Stage 3: Managing a library of downloaded books
-- Stage 4: Additional features like bookmarks, speed control, etc.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+4. Run production server in docker swarm:
+   ```
+   make prod
+   ```
 
 ## License
 
